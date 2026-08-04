@@ -1,6 +1,6 @@
 THIS_FILE := $(lastword $(MAKEFILE_LIST))
 
-.PHONY: help build bash install install-dev up restart down run npm-build restart-queue npm-install
+.PHONY: help bash-php install migrate up down tests
 
 help: ## Display this help message with descriptions of all available Makefile targets.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(THIS_FILE) | \
@@ -9,15 +9,12 @@ help: ## Display this help message with descriptions of all available Makefile t
 bash-php: ## Start a Bash shell session inside the 'marketing-php' container.
 	docker compose run --rm marketing-php bash
 
-bash-composer: ## Start a Bash shell session inside the 'marketing-composer' container.
-	docker compose run --rm marketing-composer bash
-
 install: ## Install production PHP dependencies and prepare .env
 	@if [ ! -f src/.env ]; then \
-      	echo "Creating .env from .env.example"; \
-      	cp src/.env.example src/.env; \
+       	echo "Creating .env from .env.example"; \
+       	cp src/.env.example src/.env; \
     fi
-	docker compose run --rm marketing-composer sh -c "composer install --no-cache"
+	docker compose run --rm marketing-php sh -c "composer install --no-cache"
 	docker compose run --rm marketing-php sh -c "php artisan key:generate"
 	make up
 	make migrate

@@ -18,7 +18,7 @@ cp src/.env.example src/.env
 Установить PHP-зависимости, если они еще не установлены:
 
 ```bash
-docker compose run --rm marketing-composer sh -c "composer install --no-cache"
+docker compose run --rm marketing-php composer install --no-cache
 ```
 
 Сгенерировать ключ приложения:
@@ -27,11 +27,15 @@ docker compose run --rm marketing-composer sh -c "composer install --no-cache"
 docker compose run --rm marketing-php php artisan key:generate
 ```
 
-Поднять контейнеры:
+Поднять базовые сервисы:
 
 ```bash
-docker compose up -d
+docker compose up -d marketing-db marketing-cache
 ```
+
+Сервис `marketing-php` используется для разовых Artisan-команд через `docker compose run --rm marketing-php ...`. Без веб-сервера держать его постоянно запущенным не нужно.
+
+Сервис `marketing-queue` нужен только если в проекте появятся фоновые jobs. Сейчас парсеры и Telegram-уведомления работают напрямую из scheduler.
 
 Применить миграции:
 
@@ -72,10 +76,10 @@ TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 ```
 
-После изменения `.env` перезапустите контейнеры приложения:
+После изменения `.env` перезапустите scheduler:
 
 ```bash
-docker compose restart marketing-php marketing-queue marketing-scheduler
+docker compose restart marketing-scheduler
 ```
 
 Если Telegram не настроен, данные все равно сохраняются в базу, но уведомления не отправляются.
@@ -88,13 +92,13 @@ docker compose restart marketing-php marketing-queue marketing-scheduler
 docker compose ps
 ```
 
-Посмотреть логи приложения:
+Посмотреть логи PHP-сервиса, если он запущен:
 
 ```bash
 docker compose logs -f marketing-php
 ```
 
-Посмотреть логи очереди:
+Посмотреть логи очереди, если она запущена:
 
 ```bash
 docker compose logs -f marketing-queue

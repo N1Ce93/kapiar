@@ -1,17 +1,4 @@
 services:
-  marketing-web:
-    image: "caddy:2.9-alpine"
-    container_name: "web"
-    restart: unless-stopped
-    working_dir: "/app"
-    ports:
-      - "80:80"
-    volumes:
-      - "./docker/caddy/Caddyfile:/etc/caddy/Caddyfile"
-      - "./src:/app"
-    networks:
-      - marketing
-
   marketing-php:
     restart: unless-stopped
     build:
@@ -25,16 +12,6 @@ services:
     volumes:
       - "./src:/app"
       - "./docker/php/php.ini:/usr/local/etc/php/conf.d/custom.ini"
-    networks:
-      - marketing
-
-  marketing-composer:
-    image: "composer:2"
-    container_name: "marketing-composer"
-    working_dir: "/app"
-    user: "1000:1000"
-    volumes:
-      - "./src:/app"
     networks:
       - marketing
 

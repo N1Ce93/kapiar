@@ -35,10 +35,10 @@ TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 ```
 
-После изменения `.env` перезапустите контейнеры приложения:
+После изменения `.env` перезапустите scheduler:
 
 ```bash
-docker compose restart marketing-php marketing-queue marketing-scheduler
+docker compose restart marketing-scheduler
 ```
 
 ## 3. Авторизовать Telegram-Аккаунт
