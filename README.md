@@ -9,11 +9,36 @@ Laravel-приложение мониторит новостные сайты и
 
 ## Первый Запуск
 
+Создать корневой `.env` для Docker Compose, если файла еще нет:
+
+```bash
+cp .env.example .env
+```
+
+В корневом `.env` задаются переменные контейнеров:
+
+```env
+MYSQL_DATABASE=marketing
+MYSQL_ROOT_PASSWORD=root
+```
+
 Создать `src/.env`, если файла еще нет:
 
 ```bash
 cp src/.env.example src/.env
 ```
+
+В `src/.env` пароль Laravel должен совпадать с `MYSQL_ROOT_PASSWORD` из корневого `.env`:
+
+```env
+DB_DATABASE=marketing
+DB_USERNAME=root
+DB_PASSWORD=root
+```
+
+Для продакшена замените `MYSQL_ROOT_PASSWORD` и `DB_PASSWORD` на один и тот же надежный пароль до первого запуска MySQL.
+
+Если база уже была создана со старым паролем, изменение `MYSQL_ROOT_PASSWORD` в `.env` не поменяет пароль внутри существующей MySQL-базы автоматически.
 
 Установить PHP-зависимости, если они еще не установлены:
 
