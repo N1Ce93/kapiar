@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('articles', function (Blueprint $table) {
             $table->id();
             $table->foreignId('monitored_site_id')->constrained()->cascadeOnDelete();
-            $table->string('url')->unique();
+            $table->string('url', 768)->unique();
             $table->text('title')->nullable();
             $table->text('excerpt')->nullable();
             $table->string('content_hash', 64)->nullable();
