@@ -8,7 +8,6 @@ services:
     working_dir: "/app"
     environment:
       - "DB_HOST=marketing-db"
-    user: "1000:1000"
     volumes:
       - "./src:/app"
       - "./docker/php/php.ini:/usr/local/etc/php/conf.d/custom.ini"
@@ -46,7 +45,6 @@ services:
       context: .
       dockerfile: docker/php/Dockerfile
     container_name: "marketing-queue"
-    user: "1000:1000"
     depends_on:
       - marketing-cache
     volumes:
@@ -66,7 +64,6 @@ services:
       context: .
       dockerfile: docker/php/Dockerfile
     container_name: "marketing-scheduler"
-    user: "1000:1000"
     depends_on:
       - marketing-db
       - marketing-cache
