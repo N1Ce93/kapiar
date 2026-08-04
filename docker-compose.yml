@@ -1,0 +1,106 @@
+services:
+  marketing-web:
+    image: "caddy:2.9-alpine"
+    container_name: "web"
+    restart: unless-stopped
+    working_dir: "/app"
+    ports:
+      - "80:80"
+    volumes:
+      - "./docker/caddy/Caddyfile:/etc/caddy/Caddyfile"
+      - "./src:/app"
+    networks:
+      - marketing
+
+  marketing-php:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    container_name: "marketing-php"
+    working_dir: "/app"
+    environment:
+      - "DB_HOST=marketing-db"
+    user: "1000:1000"
+    volumes:
+      - "./src:/app"
+      - "./docker/php/php.ini:/usr/local/etc/php/conf.d/custom.ini"
+    networks:
+      - marketing
+
+  marketing-composer:
+    image: "composer:2"
+    container_name: "marketing-composer"
+    working_dir: "/app"
+    user: "1000:1000"
+    volumes:
+      - "./src:/app"
+    networks:
+      - marketing
+
+  marketing-db:
+    restart: unless-stopped
+    image: "mysql:8.4"
+    container_name: "marketing-db"
+    environment:
+        MYSQL_DATABASE: marketing
+        MYSQL_ROOT_PASSWORD: root
+        MYSQL_AUTHENTICATION_PLUGIN: mysql_native_password
+    volumes:
+      - "./.mysql:/var/lib/mysql"
+    networks:
+      - marketing
+
+  marketing-cache:
+    restart: unless-stopped
+    image: "valkey/valkey:8-alpine"
+    container_name: "marketing-cache"
+    command: "valkey-server --appendonly yes --loglevel warning"
+    volumes:
+      - "./.redis:/data"
+    networks:
+      - marketing
+
+  marketing-queue:
+    environment:
+      - "REDIS_HOST=marketing-cache"
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    container_name: "marketing-queue"
+    user: "1000:1000"
+    depends_on:
+      - marketing-cache
+    volumes:
+      - "./src:/app"
+      - "./docker/php/php.ini:/usr/local/etc/php/conf.d/custom.ini"
+    working_dir: "/app"
+    command: "php artisan queue:work --queue=default --timeout=3600"
+    networks:
+      - marketing
+
+  marketing-scheduler:
+    environment:
+      - "DB_HOST=marketing-db"
+      - "REDIS_HOST=marketing-cache"
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    container_name: "marketing-scheduler"
+    user: "1000:1000"
+    depends_on:
+      - marketing-db
+      - marketing-cache
+    volumes:
+      - "./src:/app"
+      - "./docker/php/php.ini:/usr/local/etc/php/conf.d/custom.ini"
+    working_dir: "/app"
+    command: "php artisan schedule:work"
+    networks:
+      - marketing
+
+networks:
+  marketing:
+    name: "marketing"

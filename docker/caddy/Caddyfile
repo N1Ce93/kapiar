@@ -1,0 +1,10 @@
+:80 {
+    encode zstd gzip
+    root * /app/public
+
+    php_fastcgi marketing-php:9000 {
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    file_server
+}
