@@ -2,23 +2,22 @@
 
 namespace App\Console\Commands;
 
+use App\Jobs\CheckMonitoredSiteJob;
 use App\Models\MonitoredSite;
-use App\Services\Monitoring\ArticleMonitorService;
 use App\Services\Monitoring\UrlHelper;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
-use Throwable;
 
-#[Signature('parser:check
+#[Signature('sources:dispatch-checks
     {--site= : Site id, name, host, or base URL}
-    {--limit=50 : Maximum number of fresh articles per site}
-    {--sites-limit= : Maximum number of sites to check in this run}
+    {--limit=20 : Maximum number of fresh articles per site job}
+    {--sites-limit= : Maximum number of sites to dispatch in this run}
     {--no-notify : Save and analyze new articles without Telegram notifications}')]
-#[Description('Check monitored sites for new articles and notify Telegram on keyword hits')]
-class ParserCheckCommand extends Command
+#[Description('Dispatch monitored site checks to the sources queue')]
+class SourcesDispatchChecksCommand extends Command
 {
-    public function handle(ArticleMonitorService $monitorService): int
+    public function handle(): int
     {
         $sites = $this->sites();
         $limit = max(1, (int) $this->option('limit'));
@@ -30,24 +29,17 @@ class ParserCheckCommand extends Command
         }
 
         foreach ($sites as $site) {
-            $this->info('Checking '.$site->name.'...');
+            $site->forceFill(['last_queued_at' => now()])->save();
 
-            try {
-                $stats = $monitorService->ingestSite($site, $limit, backfill: false, analyze: true, notify: ! $this->option('no-notify'));
-            } catch (Throwable $exception) {
-                $this->error($exception->getMessage());
-                continue;
-            }
-
-            $this->table(['Found', 'New', 'Already known', 'Analyzed', 'Hits', 'Telegram sent'], [[
-                $stats['found'],
-                $stats['created'],
-                $stats['skipped'],
-                $stats['analyzed'],
-                $stats['hits'],
-                $stats['sent'],
-            ]]);
+            CheckMonitoredSiteJob::dispatch(
+                siteId: $site->id,
+                limit: $limit,
+                analyze: true,
+                notify: ! $this->option('no-notify'),
+            );
         }
+
+        $this->info('Selected site check jobs: '.$sites->count());
 
         return self::SUCCESS;
     }
@@ -58,7 +50,7 @@ class ParserCheckCommand extends Command
         $site = $this->option('site');
 
         if (! $site) {
-            $query->orderBy('last_checked_at')->orderBy('id');
+            $query->orderBy('last_queued_at')->orderBy('last_checked_at')->orderBy('id');
 
             if ($this->option('sites-limit')) {
                 $query->limit(max(1, (int) $this->option('sites-limit')));

@@ -8,6 +8,7 @@ use App\Services\Monitoring\UrlHelper;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
+use Throwable;
 
 #[Signature('parser:backfill
     {--site= : Site id, name, host, or base URL}
@@ -29,7 +30,13 @@ class ParserBackfillCommand extends Command
 
         foreach ($sites as $site) {
             $this->info('Backfilling '.$site->name.'...');
-            $stats = $monitorService->ingestSite($site, $limit, backfill: true, analyze: (bool) $this->option('analyze'), notify: false);
+
+            try {
+                $stats = $monitorService->ingestSite($site, $limit, backfill: true, analyze: (bool) $this->option('analyze'), notify: false);
+            } catch (Throwable $exception) {
+                $this->error($exception->getMessage());
+                continue;
+            }
 
             $this->table(['Found', 'Saved', 'Already known', 'Analyzed', 'Hits'], [[
                 $stats['found'],

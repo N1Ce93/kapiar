@@ -19,6 +19,7 @@ class TelegramChannelsSeeder extends Seeder
             'zaborzp' => 'zaborzp',
             'prufzp' => 'prufzp',
             'ivan_fedorov_zp' => 'ivan_fedorov_zp',
+            'oblasna_zp' => 'oblasna_zp',
             'zoda_gov_ua' => 'Запорізька обласна державна адміністрація',
             'zp_informue' => 'zp_informue',
             'zaporizka_sish' => 'zaporizka_sish',

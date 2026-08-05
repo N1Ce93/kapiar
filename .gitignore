@@ -1,3 +1,8 @@
 .mysql
 .redis
 .env
+src/.env
+src/storage/logs/*.log
+src/storage/app/telegram/
+src/database/*.sqlite
+.idea

@@ -24,6 +24,11 @@ services:
       MYSQL_AUTHENTICATION_PLUGIN: mysql_native_password
     volumes:
       - "./.mysql:/var/lib/mysql"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-root}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     networks:
       - marketing
 
@@ -34,24 +39,67 @@ services:
     command: "valkey-server --appendonly yes --loglevel warning"
     volumes:
       - "./.redis:/data"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     networks:
       - marketing
 
-  marketing-queue:
+  marketing-sources-queue:
     environment:
+      - "DB_HOST=marketing-db"
       - "REDIS_HOST=marketing-cache"
     restart: unless-stopped
+    stop_grace_period: 12m
     build:
       context: .
       dockerfile: docker/php/Dockerfile
-    container_name: "marketing-queue"
+    container_name: "marketing-sources-queue"
     depends_on:
-      - marketing-cache
+      marketing-db:
+        condition: service_healthy
+      marketing-cache:
+        condition: service_healthy
     volumes:
       - "./src:/app"
       - "./docker/php/php.ini:/usr/local/etc/php/conf.d/custom.ini"
     working_dir: "/app"
-    command: "php artisan queue:work --queue=default --timeout=3600"
+    command: "php artisan queue:work --queue=sources --timeout=660 --tries=1 --max-time=3600 --max-jobs=500"
+    healthcheck:
+      test: ["CMD", "php", "artisan", "queue:monitor", "redis:sources", "--max=200"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+    networks:
+      - marketing
+
+  marketing-telegram-queue:
+    environment:
+      - "DB_HOST=marketing-db"
+      - "REDIS_HOST=marketing-cache"
+    restart: unless-stopped
+    stop_grace_period: 6m
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    container_name: "marketing-telegram-queue"
+    depends_on:
+      marketing-db:
+        condition: service_healthy
+      marketing-cache:
+        condition: service_healthy
+    volumes:
+      - "./src:/app"
+      - "./docker/php/php.ini:/usr/local/etc/php/conf.d/custom.ini"
+    working_dir: "/app"
+    command: "php artisan queue:work --queue=telegram --timeout=360 --tries=1 --max-time=3600 --max-jobs=300"
+    healthcheck:
+      test: ["CMD", "php", "artisan", "queue:monitor", "redis:telegram", "--max=200"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
     networks:
       - marketing
 
@@ -60,18 +108,26 @@ services:
       - "DB_HOST=marketing-db"
       - "REDIS_HOST=marketing-cache"
     restart: unless-stopped
+    stop_grace_period: 1m
     build:
       context: .
       dockerfile: docker/php/Dockerfile
     container_name: "marketing-scheduler"
     depends_on:
-      - marketing-db
-      - marketing-cache
+      marketing-db:
+        condition: service_healthy
+      marketing-cache:
+        condition: service_healthy
     volumes:
       - "./src:/app"
       - "./docker/php/php.ini:/usr/local/etc/php/conf.d/custom.ini"
     working_dir: "/app"
     command: "php artisan schedule:work"
+    healthcheck:
+      test: ["CMD", "php", "artisan", "schedule:list"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
     networks:
       - marketing
 

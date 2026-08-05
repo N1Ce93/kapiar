@@ -129,7 +129,7 @@ docker compose run --rm marketing-php php artisan parser:backfill --limit=500 --
 
 ## 9. Проверить Новые Статьи
 
-Ручной запуск проверки новых статей:
+Ручной запуск проверки новых статей напрямую, без очереди:
 
 ```bash
 docker compose run --rm marketing-php php artisan parser:check
@@ -153,15 +153,63 @@ docker compose run --rm marketing-php php artisan parser:check --site="example.c
 docker compose run --rm marketing-php php artisan parser:check --limit=20
 ```
 
+Проверить только часть сайтов за один запуск:
+
+```bash
+docker compose run --rm marketing-php php artisan parser:check --sites-limit=15 --limit=20
+```
+
+Проверить без Telegram-уведомлений:
+
+```bash
+docker compose run --rm marketing-php php artisan parser:check --no-notify
+```
+
 Статья считается новой, если ее `url` еще нет в таблице `articles`.
 
-## 10. Автоматическая Проверка
+Поставить проверки сайтов в очередь `sources`:
 
-В `src/routes/console.php` настроена проверка каждые 5 минут:
+```bash
+docker compose run --rm marketing-php php artisan sources:dispatch-checks --sites-limit=15 --limit=20
+```
+
+Каждый сайт обрабатывается отдельной job. Повторная job для того же сайта не добавляется, пока предыдущая еще находится в очереди или выполняется.
+
+## 10. Обновить Источники Сайтов
+
+Если сайт был добавлен как HTML, но позже появилась RSS-лента, можно заново определить источник:
+
+```bash
+docker compose run --rm marketing-php php artisan sites:refresh-sources --site="example.com"
+```
+
+Проверить без сохранения изменений:
+
+```bash
+docker compose run --rm marketing-php php artisan sites:refresh-sources --dry-run
+```
+
+## 11. Автоматическая Проверка
+
+В `src/routes/console.php` настроена постановка задач в очередь каждые 10 минут:
 
 ```php
-Schedule::command('parser:check')->everyFiveMinutes()->withoutOverlapping();
+Schedule::command('sources:dispatch-checks --sites-limit=15 --limit=20')->everyTenMinutes()->withoutOverlapping();
 ```
+
+Для обработки jobs нужен worker очереди `sources`:
+
+```bash
+docker compose run --rm marketing-php php artisan queue:work --queue=sources --timeout=300 --tries=1
+```
+
+В Docker Compose для этого есть отдельный сервис:
+
+```bash
+docker compose up -d marketing-sources-queue
+```
+
+Ошибки сохраняются в `monitored_sites`: `consecutive_failures`, `last_error_at`, `last_error`. После 4 ошибок подряд сайт автоматически отключается и отправляется Telegram-уведомление.
 
 Запустить scheduler:
 
@@ -186,6 +234,8 @@ docker compose logs -f marketing-scheduler
 ```bash
 docker compose run --rm marketing-php php artisan sites:probe "https://example.com/"
 docker compose run --rm marketing-php php artisan sites:add "https://example.com/"
+docker compose run --rm marketing-php php artisan sites:refresh-sources --site="example.com"
 docker compose run --rm marketing-php php artisan parser:backfill --limit=500
 docker compose run --rm marketing-php php artisan parser:check
+docker compose run --rm marketing-php php artisan sources:dispatch-checks --sites-limit=15 --limit=20
 ```

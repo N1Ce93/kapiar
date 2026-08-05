@@ -124,31 +124,61 @@ class TelegramChannelMonitorService
     {
         $client = $this->authenticatedClient();
         $peer = $channel->telegram_peer ?: '@'.$channel->username;
-        $response = $client->messages->getHistory(peer: $peer, limit: $limit);
+        $pageSize = $afterMessageId === null ? min(100, max(1, $limit)) : min(100, max(20, $limit));
+        $totalLimit = $afterMessageId === null ? max(1, $limit) : 2000;
         $messages = [];
+        $offsetId = 0;
+        $reachedCheckpoint = $afterMessageId === null;
 
-        foreach (($response['messages'] ?? []) as $message) {
-            if (($message['_'] ?? '') !== 'message') {
-                continue;
+        for ($page = 1; count($messages) < $totalLimit && $page <= 20; $page++) {
+            $requestLimit = min($pageSize, $totalLimit - count($messages));
+            $response = $offsetId > 0
+                ? $client->messages->getHistory(peer: $peer, limit: $requestLimit, offset_id: $offsetId)
+                : $client->messages->getHistory(peer: $peer, limit: $requestLimit);
+            $responseMessages = $response['messages'] ?? [];
+            $minMessageId = null;
+
+            foreach ($responseMessages as $message) {
+                if (($message['_'] ?? '') !== 'message') {
+                    continue;
+                }
+
+                $id = (int) ($message['id'] ?? 0);
+
+                if ($id <= 0) {
+                    continue;
+                }
+
+                $minMessageId = $minMessageId === null ? $id : min($minMessageId, $id);
+
+                if ($afterMessageId !== null && $id <= $afterMessageId) {
+                    $reachedCheckpoint = true;
+                    continue;
+                }
+
+                $text = trim((string) ($message['message'] ?? ''));
+
+                if ($text === '') {
+                    continue;
+                }
+
+                $messages[] = [
+                    'message_id' => $id,
+                    'text' => $text,
+                    'url' => 'https://t.me/'.$channel->username.'/'.$id,
+                    'posted_at' => isset($message['date']) ? CarbonImmutable::createFromTimestamp((int) $message['date']) : null,
+                ];
             }
 
-            $id = (int) ($message['id'] ?? 0);
-            $text = trim((string) ($message['message'] ?? ''));
-
-            if ($id <= 0 || $text === '') {
-                continue;
+            if ($minMessageId === null || $reachedCheckpoint || count($responseMessages) < $requestLimit) {
+                break;
             }
 
-            if ($afterMessageId !== null && $id <= $afterMessageId) {
-                continue;
-            }
+            $offsetId = $minMessageId;
+        }
 
-            $messages[] = [
-                'message_id' => $id,
-                'text' => $text,
-                'url' => 'https://t.me/'.$channel->username.'/'.$id,
-                'posted_at' => isset($message['date']) ? CarbonImmutable::createFromTimestamp((int) $message['date']) : null,
-            ];
+        if (! $reachedCheckpoint && count($messages) >= $totalLimit) {
+            throw new RuntimeException('Telegram channel has more than '.$totalLimit.' new text messages since the previous checkpoint. Increase the channel job limit or run a backfill.');
         }
 
         usort($messages, fn (array $a, array $b): int => $a['message_id'] <=> $b['message_id']);

@@ -4,6 +4,15 @@ namespace App\Services\Monitoring;
 
 class UrlHelper
 {
+    public static function crawlerHeaders(): array
+    {
+        return [
+            'User-Agent' => 'Mozilla/5.0 (compatible; MarketingMonitor/1.0; +https://example.com/monitor)',
+            'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,application/rss+xml;q=0.9,*/*;q=0.8',
+            'Accept-Language' => 'uk-UA,uk;q=0.9,ru;q=0.8,en;q=0.7',
+        ];
+    }
+
     public static function normalizeBaseUrl(string $url): string
     {
         $url = trim($url);
@@ -36,8 +45,10 @@ class UrlHelper
         }
 
         $path = $parts['path'] ?? '/';
+        $port = isset($parts['port']) ? ':'.$parts['port'] : '';
+        $query = self::cleanQuery($parts['query'] ?? null);
 
-        return strtolower($parts['scheme']).'://'.strtolower($parts['host']).$path;
+        return strtolower($parts['scheme']).'://'.strtolower($parts['host']).$port.$path.($query ? '?'.$query : '');
     }
 
     public static function origin(string $url): string
@@ -50,6 +61,11 @@ class UrlHelper
     public static function host(string $url): string
     {
         return strtolower(parse_url($url, PHP_URL_HOST) ?: '');
+    }
+
+    public static function sameHost(string $firstUrl, string $secondUrl): bool
+    {
+        return self::comparableHost($firstUrl) === self::comparableHost($secondUrl);
     }
 
     public static function absoluteUrl(string $href, string $baseUrl): ?string
@@ -85,5 +101,33 @@ class UrlHelper
     public static function withoutTrailingSlash(string $url): string
     {
         return rtrim($url, '/');
+    }
+
+    private static function comparableHost(string $url): string
+    {
+        $host = self::host($url);
+
+        return str_starts_with($host, 'www.') ? substr($host, 4) : $host;
+    }
+
+    private static function cleanQuery(?string $query): string
+    {
+        if (! $query) {
+            return '';
+        }
+
+        parse_str($query, $params);
+
+        foreach (array_keys($params) as $key) {
+            $normalized = strtolower((string) $key);
+
+            if (str_starts_with($normalized, 'utm_') || in_array($normalized, ['fbclid', 'gclid', 'yclid'], true)) {
+                unset($params[$key]);
+            }
+        }
+
+        ksort($params);
+
+        return http_build_query($params, '', '&', PHP_QUERY_RFC3986);
     }
 }

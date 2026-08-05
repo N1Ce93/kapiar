@@ -7,6 +7,7 @@ use danog\MadelineProto\API;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Cache;
 use Throwable;
 
 #[Signature('telegram:login
@@ -18,8 +19,16 @@ class TelegramLoginCommand extends Command
 {
     public function handle(TelegramClientService $clientService): int
     {
+        $lock = Cache::lock('telegram:monitoring:session-lock', 300);
+
+        if (! $lock->get()) {
+            $this->error('Telegram session is currently used by another process. Stop marketing-telegram-queue and try again.');
+
+            return self::FAILURE;
+        }
+
         try {
-            $this->warn('Before login, it is better to stop scheduler: docker compose stop marketing-scheduler');
+            $this->warn('Before login, stop Telegram workers: docker compose stop marketing-telegram-queue');
             $this->info('Starting Telegram account authorization.');
 
             $client = $clientService->client();
@@ -61,6 +70,8 @@ class TelegramLoginCommand extends Command
             $this->error($exception->getMessage());
 
             return self::FAILURE;
+        } finally {
+            $lock->release();
         }
 
         $this->info('Telegram account is authorized.');

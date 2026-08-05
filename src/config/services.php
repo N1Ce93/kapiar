@@ -36,8 +36,10 @@ return [
     ],
 
     'telegram' => [
+        'monitoring_enabled' => env('TELEGRAM_MONITORING_ENABLED', false),
         'bot_token' => env('TELEGRAM_BOT_TOKEN'),
         'chat_id' => env('TELEGRAM_CHAT_ID'),
+        'reply_to_message_id' => env('TELEGRAM_REPLY_TO_MESSAGE_ID', 8240),
         'api_id' => env('TELEGRAM_API_ID'),
         'api_hash' => env('TELEGRAM_API_HASH'),
         'session' => env('TELEGRAM_SESSION', storage_path('app/telegram/client.session')),

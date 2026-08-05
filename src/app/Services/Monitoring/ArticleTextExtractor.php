@@ -13,7 +13,8 @@ class ArticleTextExtractor
     public function extract(string $url): ?array
     {
         try {
-            $response = Http::withHeaders(['User-Agent' => 'MarketingMonitor/1.0'])
+            $response = Http::withHeaders(UrlHelper::crawlerHeaders())
+                ->withoutVerifying()
                 ->timeout(20)
                 ->retry(1, 500)
                 ->get($url);

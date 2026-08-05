@@ -7,6 +7,7 @@ use App\Services\Monitoring\TelegramChannelMonitorService;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Cache;
 use Throwable;
 
 #[Signature('telegram-channels:backfill
@@ -20,33 +21,47 @@ class TelegramChannelsBackfillCommand extends Command
     {
         $channels = $this->channels();
         $limit = max(1, (int) $this->option('limit'));
+        $lock = Cache::lock('telegram:monitoring:session-lock', 900);
 
-        if ($channels->isEmpty()) {
-            $this->warn('No Telegram channels found.');
+        if (! $lock->get()) {
+            $this->error('Telegram session is currently used by another process. Stop marketing-telegram-queue or wait for the current job to finish.');
 
-            return self::SUCCESS;
+            return self::FAILURE;
         }
 
-        foreach ($channels as $channel) {
-            $this->info('Backfilling @'.$channel->username.'...');
+        try {
+            if ($channels->isEmpty()) {
+                $this->warn('No Telegram channels found.');
 
-            try {
-                $stats = $monitorService->ingestChannel($channel, $limit, backfill: true, analyze: (bool) $this->option('analyze'), notify: false);
-            } catch (Throwable $exception) {
-                $this->error($this->telegramError($exception));
-                continue;
+                return self::SUCCESS;
             }
 
-            $this->table(['Found', 'Saved', 'Already known', 'Analyzed', 'Hits'], [[
-                $stats['found'],
-                $stats['created'],
-                $stats['skipped'],
-                $stats['analyzed'],
-                $stats['hits'],
-            ]]);
-        }
+            $failed = 0;
 
-        return self::SUCCESS;
+            foreach ($channels as $channel) {
+                $this->info('Backfilling @'.$channel->username.'...');
+
+                try {
+                    $stats = $monitorService->ingestChannel($channel, $limit, backfill: true, analyze: (bool) $this->option('analyze'), notify: false);
+                } catch (Throwable $exception) {
+                    $failed++;
+                    $this->error($this->telegramError($exception));
+                    continue;
+                }
+
+                $this->table(['Found', 'Saved', 'Already known', 'Analyzed', 'Hits'], [[
+                    $stats['found'],
+                    $stats['created'],
+                    $stats['skipped'],
+                    $stats['analyzed'],
+                    $stats['hits'],
+                ]]);
+            }
+
+            return $failed > 0 ? self::FAILURE : self::SUCCESS;
+        } finally {
+            $lock->release();
+        }
     }
 
     private function channels()

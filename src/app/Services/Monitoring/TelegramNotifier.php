@@ -50,20 +50,29 @@ class TelegramNotifier
             return false;
         }
 
+        $payload = [
+            'chat_id' => $chatId,
+            'text' => mb_substr($message, 0, 4000, 'UTF-8'),
+            'disable_web_page_preview' => false,
+        ];
+
+        if ((string) $chatId === '-1002354975882' && config('services.telegram.reply_to_message_id')) {
+            $payload['reply_to_message_id'] = (int) config('services.telegram.reply_to_message_id');
+        }
+
         try {
-            $response = Http::asForm()->timeout(15)->post('https://api.telegram.org/bot'.$token.'/sendMessage', [
-                'chat_id' => $chatId,
-                'text' => mb_substr($message, 0, 4000, 'UTF-8'),
-                'disable_web_page_preview' => false,
-            ]);
+            $response = Http::asForm()->timeout(15)->post('https://api.telegram.org/bot'.$token.'/sendMessage', $payload);
         } catch (Throwable $exception) {
-            Log::warning('Telegram send failed.', ['error' => $exception->getMessage()]);
+            Log::warning('Telegram send failed.', ['error' => $this->redact((string) $exception->getMessage())]);
 
             return false;
         }
 
         if (! $response->successful()) {
-            Log::warning('Telegram send returned non-success response.', ['status' => $response->status(), 'body' => $response->body()]);
+            Log::warning('Telegram send returned non-success response.', [
+                'status' => $response->status(),
+                'body' => $this->redact($response->body()),
+            ]);
 
             return false;
         }
@@ -85,5 +94,27 @@ class TelegramNotifier
         ));
 
         return $this->sendMessage($text);
+    }
+
+    public function sendSourceDisabled(string $type, string $name, string $reason): bool
+    {
+        return $this->sendMessage(trim(sprintf(
+            "Источник автоматически отключён\n\nТип: %s\nИсточник: %s\nПричина: %s",
+            $type,
+            $name,
+            mb_substr($this->redact($reason), 0, 1000, 'UTF-8'),
+        )));
+    }
+
+    private function redact(string $text): string
+    {
+        $token = (string) config('services.telegram.bot_token');
+        $apiHash = (string) config('services.telegram.api_hash');
+
+        foreach (array_filter([$token, $apiHash]) as $secret) {
+            $text = str_replace($secret, '[redacted]', $text);
+        }
+
+        return preg_replace('~bot\d+:[A-Za-z0-9_-]+~', 'bot[redacted]', $text) ?? $text;
     }
 }

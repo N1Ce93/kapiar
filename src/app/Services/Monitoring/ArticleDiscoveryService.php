@@ -7,6 +7,7 @@ use Carbon\CarbonImmutable;
 use DOMDocument;
 use DOMXPath;
 use Illuminate\Support\Facades\Http;
+use RuntimeException;
 use Throwable;
 
 class ArticleDiscoveryService
@@ -28,13 +29,11 @@ class ArticleDiscoveryService
     /** @return list<array{url:string,title:?string,excerpt:?string,published_at:?CarbonImmutable}> */
     private function discoverFromRssSite(MonitoredSite $site, int $limit): array
     {
-        $fromApi = $this->discoverFromWordPressApi($site, $limit);
-
-        if ($fromApi !== []) {
-            return $fromApi;
+        if ($site->feed_url) {
+            return $this->discoverFromFeed($site->feed_url, $limit);
         }
 
-        return $this->discoverFromFeed($site->feed_url, $limit);
+        return $this->discoverFromWordPressApi($site, $limit);
     }
 
     /** @return list<array{url:string,title:?string,excerpt:?string,published_at:?CarbonImmutable}> */
@@ -46,7 +45,8 @@ class ArticleDiscoveryService
 
         for ($page = 1; count($items) < $limit && $page <= 20; $page++) {
             try {
-                $response = Http::withHeaders(['User-Agent' => 'MarketingMonitor/1.0'])
+                $response = Http::withHeaders(UrlHelper::crawlerHeaders())
+                    ->withoutVerifying()
                     ->timeout(20)
                     ->retry(1, 500)
                     ->get($apiBase, [
@@ -89,26 +89,27 @@ class ArticleDiscoveryService
         }
 
         try {
-            $response = Http::withHeaders(['User-Agent' => 'MarketingMonitor/1.0'])
+            $response = Http::withHeaders(UrlHelper::crawlerHeaders())
+                ->withoutVerifying()
                 ->timeout(20)
                 ->retry(1, 500)
                 ->get($feedUrl);
-        } catch (Throwable) {
-            return [];
+        } catch (Throwable $exception) {
+            throw new RuntimeException('RSS feed request failed: '.$exception->getMessage(), previous: $exception);
         }
 
         if (! $response->successful()) {
-            return [];
+            throw new RuntimeException('RSS feed returned HTTP '.$response->status().': '.$feedUrl);
         }
 
         try {
             $xml = @simplexml_load_string($response->body(), 'SimpleXMLElement', LIBXML_NOCDATA);
-        } catch (Throwable) {
-            return [];
+        } catch (Throwable $exception) {
+            throw new RuntimeException('RSS feed could not be parsed: '.$exception->getMessage(), previous: $exception);
         }
 
         if (! $xml) {
-            return [];
+            throw new RuntimeException('RSS feed could not be parsed: '.$feedUrl);
         }
 
         $items = [];
@@ -161,15 +162,24 @@ class ArticleDiscoveryService
             $url = $page === 1 ? $listingUrl : $listingUrl.(str_contains($listingUrl, '?') ? '&' : '?').'page='.$page;
 
             try {
-                $response = Http::withHeaders(['User-Agent' => 'MarketingMonitor/1.0'])
+                $response = Http::withHeaders(UrlHelper::crawlerHeaders())
+                    ->withoutVerifying()
                     ->timeout(20)
                     ->retry(1, 500)
                     ->get($url);
-            } catch (Throwable) {
+            } catch (Throwable $exception) {
+                if ($page === 1) {
+                    throw new RuntimeException('HTML listing request failed: '.$exception->getMessage(), previous: $exception);
+                }
+
                 break;
             }
 
             if (! $response->successful()) {
+                if ($page === 1) {
+                    throw new RuntimeException('HTML listing returned HTTP '.$response->status().': '.$url);
+                }
+
                 break;
             }
 
@@ -190,14 +200,33 @@ class ArticleDiscoveryService
         libxml_use_internal_errors($previous);
 
         $xpath = new DOMXPath($dom);
-        $baseHost = UrlHelper::host($baseUrl);
-        $articleLinks = $this->probeService->extractArticleLinks($html, $baseUrl);
         $items = [];
+
+        foreach ($xpath->query('//*[contains(concat(" ", normalize-space(@class), " "), " article-item ")]//a[contains(concat(" ", normalize-space(@class), " "), " article-title ")][@href]') as $node) {
+            $url = UrlHelper::absoluteUrl($node->getAttribute('href'), $baseUrl);
+
+            if ($url === null || ! UrlHelper::sameHost($url, $baseUrl)) {
+                continue;
+            }
+
+            $items[] = [
+                'url' => $url,
+                'title' => $this->cleanText($node->getAttribute('title') ?: $node->textContent),
+                'excerpt' => null,
+                'published_at' => null,
+            ];
+        }
+
+        if ($items !== []) {
+            return $this->uniqueByUrl($items);
+        }
+
+        $articleLinks = $this->probeService->extractArticleLinks($html, $baseUrl);
 
         foreach ($xpath->query('//a[@href]') as $node) {
             $url = UrlHelper::absoluteUrl($node->getAttribute('href'), $baseUrl);
 
-            if ($url === null || UrlHelper::host($url) !== $baseHost || ! in_array($url, $articleLinks, true)) {
+            if ($url === null || ! UrlHelper::sameHost($url, $baseUrl) || ! in_array($url, $articleLinks, true)) {
                 continue;
             }
 

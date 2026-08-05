@@ -77,12 +77,11 @@ class SiteProbeService
         $dom = $this->loadHtml($html);
         $xpath = new DOMXPath($dom);
         $links = [];
-        $baseHost = UrlHelper::host($baseUrl);
 
         foreach ($xpath->query('//a[@href]') as $node) {
             $url = UrlHelper::absoluteUrl($node->getAttribute('href'), $baseUrl);
 
-            if ($url === null || UrlHelper::host($url) !== $baseHost || ! $this->looksLikeArticleUrl($url, $baseUrl)) {
+            if ($url === null || ! UrlHelper::sameHost($url, $baseUrl) || ! $this->looksLikeArticleUrl($url, $baseUrl)) {
                 continue;
             }
 
@@ -179,7 +178,8 @@ class SiteProbeService
     private function getBody(string $url): ?string
     {
         try {
-            $response = Http::withHeaders(['User-Agent' => 'MarketingMonitor/1.0'])
+            $response = Http::withHeaders(UrlHelper::crawlerHeaders())
+                ->withoutVerifying()
                 ->timeout(20)
                 ->retry(1, 500)
                 ->get($url);

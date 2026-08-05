@@ -9,6 +9,7 @@ use App\Services\Monitoring\UrlHelper;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
+use Throwable;
 
 #[Signature('sites:add
     {url : Site URL to add}
@@ -74,7 +75,24 @@ class SitesAddCommand extends Command
 
         $limit = max(1, (int) $this->option('backfill-limit'));
         $this->info('Backfilling old articles without Telegram...');
-        $stats = $monitorService->ingestSite($site->fresh(), $limit, backfill: true, analyze: false, notify: false);
+
+        try {
+            $stats = $monitorService->ingestSite($site->fresh(), $limit, backfill: true, analyze: false, notify: false);
+        } catch (Throwable $exception) {
+            if ($site->wasRecentlyCreated) {
+                $site->forceFill([
+                    'enabled' => false,
+                    'last_error_at' => now(),
+                    'last_error' => mb_substr($exception::class.': '.$exception->getMessage(), 0, 4000, 'UTF-8'),
+                    'disabled_at' => now(),
+                    'disabled_reason' => 'disabled after failed initial backfill',
+                ])->save();
+            }
+
+            $this->error('Backfill failed: '.$exception->getMessage());
+
+            return self::FAILURE;
+        }
 
         $this->table(['Found', 'Saved', 'Already known'], [[
             $stats['found'],

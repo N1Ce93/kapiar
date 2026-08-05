@@ -7,6 +7,7 @@ use danog\MadelineProto\API;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Cache;
 use Throwable;
 
 #[Signature('telegram:status')]
@@ -17,10 +18,33 @@ class TelegramStatusCommand extends Command
     {
         $this->line('Session: '.$clientService->sessionPath());
         $this->line('Session exists: '.(is_dir($clientService->sessionPath()) ? 'yes' : 'no'));
+        $lock = Cache::lock('telegram:monitoring:session-lock', 120);
+
+        if (! $lock->get()) {
+            $this->error('Telegram session is currently used by another process.');
+
+            return self::FAILURE;
+        }
 
         try {
             $client = $clientService->client();
             $authorization = $client->getAuthorization();
+
+            $this->line('Authorization state: '.$this->authorizationLabel($authorization));
+
+            if ($authorization !== API::LOGGED_IN) {
+                $this->error('Telegram account is not fully authorized. Run: php artisan telegram:login');
+
+                return self::FAILURE;
+            }
+
+            try {
+                $self = $client->getSelf();
+            } catch (Throwable $exception) {
+                $this->warn('Authorized, but account info could not be read: '.$exception->getMessage());
+
+                return self::SUCCESS;
+            }
         } catch (Throwable $exception) {
             $message = $exception->getMessage();
 
@@ -33,22 +57,8 @@ class TelegramStatusCommand extends Command
             $this->error($message);
 
             return self::FAILURE;
-        }
-
-        $this->line('Authorization state: '.$this->authorizationLabel($authorization));
-
-        if ($authorization !== API::LOGGED_IN) {
-            $this->error('Telegram account is not fully authorized. Run: php artisan telegram:login');
-
-            return self::FAILURE;
-        }
-
-        try {
-            $self = $client->getSelf();
-        } catch (Throwable $exception) {
-            $this->warn('Authorized, but account info could not be read: '.$exception->getMessage());
-
-            return self::SUCCESS;
+        } finally {
+            $lock->release();
         }
 
         if (is_array($self)) {

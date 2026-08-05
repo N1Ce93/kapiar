@@ -34,7 +34,7 @@ class TelegramClientService
         $settings->setLogger((new LoggerSettings())
             ->setType(MadelineLogger::LOGGER_FILE)
             ->setExtra(storage_path('logs/madelineproto.log'))
-            ->setLevel(MadelineLogger::LEVEL_WARNING));
+            ->setLevel(MadelineLogger::LEVEL_FATAL));
 
         return new API($sessionPath, $settings);
     }

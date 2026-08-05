@@ -8,5 +8,5 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-Schedule::command('parser:check')->everyFiveMinutes()->withoutOverlapping();
-Schedule::command('telegram-channels:check')->everyFiveMinutes()->withoutOverlapping();
+Schedule::command('sources:dispatch-checks --sites-limit=15 --limit=20')->everyTenMinutes()->withoutOverlapping(15);
+Schedule::command('telegram-channels:dispatch-checks --channels-limit=20 --limit=5')->everyTenMinutes()->withoutOverlapping(15);

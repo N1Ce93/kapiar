@@ -26,6 +26,7 @@
 TELEGRAM_API_ID=
 TELEGRAM_API_HASH=
 TELEGRAM_SESSION=storage/app/telegram/client.session
+TELEGRAM_MONITORING_ENABLED=false
 ```
 
 Для отправки уведомлений также нужны:
@@ -33,20 +34,22 @@ TELEGRAM_SESSION=storage/app/telegram/client.session
 ```env
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
+TELEGRAM_REPLY_TO_MESSAGE_ID=8240
 ```
 
-После изменения `.env` перезапустите scheduler:
+После изменения `.env` перезапустите scheduler и Telegram worker, если он включен:
 
 ```bash
 docker compose restart marketing-scheduler
+docker compose restart marketing-telegram-queue
 ```
 
 ## 3. Авторизовать Telegram-Аккаунт
 
-Перед авторизацией лучше остановить scheduler, чтобы он не использовал session-файл параллельно:
+Перед авторизацией остановите Telegram worker, чтобы он не использовал session-файл параллельно:
 
 ```bash
-docker compose stop marketing-scheduler
+docker compose stop marketing-telegram-queue
 ```
 
 Запустите интерактивную авторизацию:
@@ -69,11 +72,7 @@ docker compose run --rm -it marketing-php php artisan telegram:login --phone="+3
 docker compose run --rm -it marketing-php php artisan telegram:login --phone="+380XXXXXXXXX" --code="12345"
 ```
 
-Если включена 2FA, пароль можно передать параметром:
-
-```bash
-docker compose run --rm -it marketing-php php artisan telegram:login --password="your-password"
-```
+Если включена 2FA, вводите пароль только через интерактивный secret prompt. Не передавайте пароль через CLI-аргументы, чтобы он не попал в shell history или process list.
 
 Проверить статус логина:
 
@@ -94,7 +93,7 @@ Session сохраняется в:
 src/storage/app/telegram/client.session
 ```
 
-После успешной авторизации можно снова запустить scheduler:
+После успешной авторизации установите `TELEGRAM_MONITORING_ENABLED=true` и снова запустите scheduler:
 
 ```bash
 docker compose up -d marketing-scheduler
@@ -166,7 +165,7 @@ docker compose run --rm marketing-php php artisan telegram-channels:backfill --l
 
 ## 8. Проверить Новые Посты
 
-Ручная проверка новых постов по всем каналам:
+Ручная проверка новых постов по всем каналам напрямую, без очереди:
 
 ```bash
 docker compose run --rm marketing-php php artisan telegram-channels:check
@@ -178,21 +177,49 @@ docker compose run --rm marketing-php php artisan telegram-channels:check
 docker compose run --rm marketing-php php artisan telegram-channels:check --channel=zoda_gov_ua
 ```
 
-Ограничить количество последних сообщений на канал:
+Задать количество сообщений в одном запросе к Telegram API:
 
 ```bash
 docker compose run --rm marketing-php php artisan telegram-channels:check --limit=20
 ```
 
+При обычной проверке команда догружает историю страницами до предыдущего `last_message_id`, чтобы не пропустить посты между запусками.
+
 Новый пост определяется по `message_id`. Если пост уже есть в `telegram_messages`, повторное уведомление не отправляется.
+
+Поставить проверки Telegram-каналов в очередь `telegram`:
+
+```bash
+docker compose run --rm marketing-php php artisan telegram-channels:dispatch-checks --channels-limit=20 --limit=5
+```
+
+Команда ничего не поставит в очередь, если `TELEGRAM_MONITORING_ENABLED=false`. Это безопасный режим для периода, когда Telegram worker остановлен или session требует ремонта.
+
+Каждый канал обрабатывается отдельной job. Повторная job для того же канала не добавляется, пока предыдущая еще находится в очереди или выполняется.
 
 ## 9. Автоматическая Проверка
 
-В `src/routes/console.php` настроена проверка каждые 5 минут:
+В `src/routes/console.php` настроена постановка задач в очередь каждые 10 минут:
 
 ```php
-Schedule::command('telegram-channels:check')->everyFiveMinutes()->withoutOverlapping();
+Schedule::command('telegram-channels:dispatch-checks --channels-limit=20 --limit=5')->everyTenMinutes()->withoutOverlapping();
 ```
+
+Для Telegram используйте отдельный worker и на первом этапе только один процесс, потому что Telegram Client API использует общий session-файл:
+
+```bash
+docker compose run --rm marketing-php php artisan queue:work --queue=telegram --timeout=180 --tries=1
+```
+
+В Docker Compose для этого есть отдельный сервис:
+
+```bash
+docker compose up -d marketing-telegram-queue
+```
+
+Не запускайте worker, пока `telegram:status` не показывает успешную авторизацию.
+
+Ошибки сохраняются в `telegram_channels`: `consecutive_failures`, `last_error_at`, `last_error`. После 4 ошибок подряд канал автоматически отключается и отправляется Telegram-уведомление.
 
 Запустить scheduler:
 
@@ -220,4 +247,5 @@ docker compose run --rm marketing-php php artisan telegram:status
 docker compose run --rm marketing-php php artisan telegram-channels:add "https://t.me/zoda_gov_ua"
 docker compose run --rm marketing-php php artisan telegram-channels:backfill --limit=500
 docker compose run --rm marketing-php php artisan telegram-channels:check
+docker compose run --rm marketing-php php artisan telegram-channels:dispatch-checks --channels-limit=20 --limit=5
 ```
