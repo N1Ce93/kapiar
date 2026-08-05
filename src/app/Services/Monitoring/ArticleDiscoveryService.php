@@ -102,8 +102,10 @@ class ArticleDiscoveryService
             throw new RuntimeException('RSS feed returned HTTP '.$response->status().': '.$feedUrl);
         }
 
+        $body = ltrim($response->body(), "\xEF\xBB\xBF\t\n\r\0\x0B ");
+
         try {
-            $xml = @simplexml_load_string($response->body(), 'SimpleXMLElement', LIBXML_NOCDATA);
+            $xml = @simplexml_load_string($body, 'SimpleXMLElement', LIBXML_NOCDATA);
         } catch (Throwable $exception) {
             throw new RuntimeException('RSS feed could not be parsed: '.$exception->getMessage(), previous: $exception);
         }

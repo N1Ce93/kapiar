@@ -13,6 +13,7 @@ class TelegramNotifierTest extends TestCase
         config([
             'services.telegram.bot_token' => 'test-token',
             'services.telegram.chat_id' => '-1002354975882',
+            'services.telegram.reply_to_chat_id' => '-1002354975882',
             'services.telegram.reply_to_message_id' => '8240',
         ]);
         Http::fake(['api.telegram.org/*' => Http::response(['ok' => true])]);
@@ -31,6 +32,7 @@ class TelegramNotifierTest extends TestCase
         config([
             'services.telegram.bot_token' => 'test-token',
             'services.telegram.chat_id' => '-1000000000000',
+            'services.telegram.reply_to_chat_id' => '-1002354975882',
             'services.telegram.reply_to_message_id' => '8240',
         ]);
         Http::fake(['api.telegram.org/*' => Http::response(['ok' => true])]);

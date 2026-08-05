@@ -56,8 +56,11 @@ class TelegramNotifier
             'disable_web_page_preview' => false,
         ];
 
-        if ((string) $chatId === '-1002354975882' && config('services.telegram.reply_to_message_id')) {
-            $payload['reply_to_message_id'] = (int) config('services.telegram.reply_to_message_id');
+        $replyToChatId = config('services.telegram.reply_to_chat_id');
+        $replyToMessageId = config('services.telegram.reply_to_message_id');
+
+        if ($replyToChatId && $replyToMessageId && (string) $chatId === (string) $replyToChatId) {
+            $payload['reply_to_message_id'] = (int) $replyToMessageId;
         }
 
         try {
