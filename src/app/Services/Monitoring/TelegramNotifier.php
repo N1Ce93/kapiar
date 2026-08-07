@@ -87,11 +87,12 @@ class TelegramNotifier
     public function sendTelegramChannelMention(TelegramMessage $message, array $keywords, ?string $context = null): bool
     {
         $channel = $message->channel;
+        $postedAt = $message->posted_at?->timezone(config('app.timezone'))->format('Y-m-d H:i') ?? '-';
         $text = trim(sprintf(
             "Найдено упоминание в Telegram\n\nКанал: @%s\nКлючевые слова: %s\nДата поста: %s\nСсылка: %s%s",
             $channel?->username ?? 'unknown',
             implode(', ', $keywords),
-            $message->posted_at?->format('Y-m-d H:i') ?? '-',
+            $postedAt,
             $message->url ?: '-',
             $context ? "\n\nФрагмент:\n".$context : '',
         ));
