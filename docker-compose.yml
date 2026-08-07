@@ -39,6 +39,7 @@ services:
     restart: unless-stopped
     image: "mysql:8.4"
     container_name: "marketing-db"
+    command: "--event-scheduler=ON"
     environment:
       MYSQL_DATABASE: "${MYSQL_DATABASE:-marketing}"
       MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:-root}"
