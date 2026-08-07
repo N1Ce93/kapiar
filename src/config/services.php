@@ -35,6 +35,10 @@ return [
         ],
     ],
 
+    'site_access' => [
+        'password_hash' => env('SITE_ACCESS_PASSWORD_HASH'),
+    ],
+
     'telegram' => [
         'monitoring_enabled' => env('TELEGRAM_MONITORING_ENABLED', false),
         'bot_token' => env('TELEGRAM_BOT_TOKEN'),

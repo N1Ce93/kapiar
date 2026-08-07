@@ -13,18 +13,18 @@ use Illuminate\Support\Facades\DB;
 class MonitoringStatsController extends Controller
 {
     private const MONTH_NAMES = [
-        1 => 'Январь',
-        2 => 'Февраль',
-        3 => 'Март',
-        4 => 'Апрель',
-        5 => 'Май',
-        6 => 'Июнь',
-        7 => 'Июль',
-        8 => 'Август',
-        9 => 'Сентябрь',
-        10 => 'Октябрь',
-        11 => 'Ноябрь',
-        12 => 'Декабрь',
+        1 => 'Січень',
+        2 => 'Лютий',
+        3 => 'Березень',
+        4 => 'Квітень',
+        5 => 'Травень',
+        6 => 'Червень',
+        7 => 'Липень',
+        8 => 'Серпень',
+        9 => 'Вересень',
+        10 => 'Жовтень',
+        11 => 'Листопад',
+        12 => 'Грудень',
     ];
 
     public function sites(Request $request): View
@@ -34,8 +34,8 @@ class MonitoringStatsController extends Controller
 
         return view('monitoring.stats', [
             'active' => 'sites',
-            'title' => 'Мониторинг сайтов',
-            'description' => 'Уникальные статьи с упоминаниями по каждому сайту за выбранный месяц.',
+            'title' => 'Моніторинг сайтів',
+            'description' => 'Унікальні статті зі згадками по кожному сайту за вибраний місяць.',
             'sourceLabel' => 'Сайт',
             'months' => $months,
             'selectedMonth' => $selectedMonth,
@@ -51,8 +51,8 @@ class MonitoringStatsController extends Controller
 
         return view('monitoring.stats', [
             'active' => 'telegram',
-            'title' => 'Мониторинг Telegram',
-            'description' => 'Уникальные сообщения с упоминаниями по каждому Telegram-каналу за выбранный месяц.',
+            'title' => 'Моніторинг Telegram',
+            'description' => 'Унікальні повідомлення зі згадками по кожному Telegram-каналу за вибраний місяць.',
             'sourceLabel' => 'Telegram-канал',
             'months' => $months,
             'selectedMonth' => $selectedMonth,

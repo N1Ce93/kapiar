@@ -66,7 +66,9 @@ class MonitoringStatsTest extends TestCase
         ]);
         ArticleKeywordHit::create(['article_id' => $oldArticle->id, 'keyword_id' => $firstKeyword->id, 'matched_text' => 'first']);
 
-        $response = $this->get('/monitoring/sites?month=2026-08');
+        $response = $this
+            ->withSession(['site_access_granted' => true])
+            ->get('/sites?month=2026-08');
 
         $response
             ->assertOk()
@@ -122,7 +124,9 @@ class MonitoringStatsTest extends TestCase
         ]);
         TelegramMessageKeywordHit::create(['telegram_message_id' => $oldMessage->id, 'keyword_id' => $firstKeyword->id, 'matched_text' => 'first']);
 
-        $response = $this->get('/monitoring/telegram?month=2026-08');
+        $response = $this
+            ->withSession(['site_access_granted' => true])
+            ->get('/telegram?month=2026-08');
 
         $response
             ->assertOk()

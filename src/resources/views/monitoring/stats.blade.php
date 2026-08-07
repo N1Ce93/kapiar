@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="uk">
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,15 +7,15 @@
         <style>
             :root {
                 color-scheme: light;
-                --bg: #f4f0e8;
-                --card: #fffaf1;
-                --card-strong: #fff3df;
-                --text: #241a12;
-                --muted: #7b6f62;
-                --line: #e3d5c1;
-                --accent: #b45309;
-                --accent-dark: #7c2d12;
-                --accent-soft: #fde7c7;
+                --bg: #f4fbff;
+                --card: #ffffff;
+                --card-strong: #eaf6ff;
+                --text: #0b2640;
+                --muted: #5f7488;
+                --line: #cfe7fb;
+                --accent: #2998ff;
+                --accent-dark: #075a9f;
+                --accent-soft: #eaf6ff;
             }
 
             * {
@@ -26,8 +26,9 @@
                 margin: 0;
                 min-height: 100vh;
                 background:
-                    radial-gradient(circle at top left, rgba(251, 191, 36, .26), transparent 34rem),
-                    linear-gradient(135deg, #f4f0e8 0%, #efe4d3 100%);
+                    radial-gradient(circle at 14% 12%, rgba(41, 152, 255, .20), transparent 34rem),
+                    radial-gradient(circle at 88% 6%, rgba(41, 152, 255, .10), transparent 26rem),
+                    linear-gradient(135deg, #ffffff 0%, var(--bg) 100%);
                 color: var(--text);
                 font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
             }
@@ -92,7 +93,7 @@
                 padding: 0 16px;
                 border: 1px solid var(--line);
                 border-radius: 999px;
-                background: rgba(255, 250, 241, .72);
+                background: rgba(255, 255, 255, .78);
                 color: var(--muted);
                 font-size: 14px;
                 font-weight: 700;
@@ -108,10 +109,10 @@
 
             .panel {
                 overflow: hidden;
-                border: 1px solid rgba(124, 45, 18, .14);
+                border: 1px solid rgba(41, 152, 255, .18);
                 border-radius: 28px;
-                background: rgba(255, 250, 241, .84);
-                box-shadow: 0 24px 80px rgba(120, 53, 15, .13);
+                background: rgba(255, 255, 255, .88);
+                box-shadow: 0 24px 80px rgba(7, 90, 159, .12);
                 backdrop-filter: blur(18px);
             }
 
@@ -122,7 +123,7 @@
                 align-items: center;
                 padding: 20px;
                 border-bottom: 1px solid var(--line);
-                background: rgba(255, 243, 223, .7);
+                background: rgba(234, 246, 255, .74);
             }
 
             .toolbar-title {
@@ -198,7 +199,7 @@
                 gap: 18px;
                 align-items: center;
                 padding: 24px 28px;
-                background: var(--text);
+                background: linear-gradient(135deg, var(--accent-dark), var(--accent));
                 color: white;
             }
 
@@ -255,21 +256,20 @@
         <main class="page">
             <section class="hero">
                 <div>
-                    <p class="eyebrow">Статистика за месяц</p>
+                    <p class="eyebrow">Статистика за місяць</p>
                     <h1>{{ $title }}</h1>
-                    <p class="description">{{ $description }}</p>
                 </div>
 
-                <nav class="tabs" aria-label="Разделы мониторинга">
-                    <a class="pill {{ $active === 'sites' ? 'active' : '' }}" href="{{ route('monitoring.sites', ['month' => $selectedMonth]) }}">Сайты</a>
+                <nav class="tabs" aria-label="Розділи моніторингу">
+                    <a class="pill {{ $active === 'sites' ? 'active' : '' }}" href="{{ route('monitoring.sites', ['month' => $selectedMonth]) }}">Сайти</a>
                     <a class="pill {{ $active === 'telegram' ? 'active' : '' }}" href="{{ route('monitoring.telegram', ['month' => $selectedMonth]) }}">Telegram</a>
                 </nav>
             </section>
 
             <section class="panel">
                 <div class="toolbar">
-                    <p class="toolbar-title">Выбор месяца: только последние 6 месяцев</p>
-                    <nav class="months" aria-label="Месяцы">
+                    <p class="toolbar-title">Вибір місяця: тільки останні 6 місяців</p>
+                    <nav class="months" aria-label="Місяці">
                         @foreach ($months as $month)
                             <a
                                 class="pill {{ $selectedMonth === $month['key'] ? 'active' : '' }}"
@@ -280,14 +280,14 @@
                 </div>
 
                 @if ($rows->isEmpty())
-                    <div class="empty">Источники пока не добавлены.</div>
+                    <div class="empty">Джерела поки не додані.</div>
                 @else
                     <div class="table-wrap">
                         <table>
                             <thead>
                                 <tr>
                                     <th>{{ $sourceLabel }}</th>
-                                    <th class="count">Упоминания</th>
+                                    <th class="count">Згадки</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -308,7 +308,7 @@
                 @endif
 
                 <div class="total">
-                    <span>Общее количество упоминаний за выбранный месяц</span>
+                    <span>Загальна кількість згадок за вибраний місяць</span>
                     <strong>{{ number_format($totalMentions, 0, ',', ' ') }}</strong>
                 </div>
             </section>
