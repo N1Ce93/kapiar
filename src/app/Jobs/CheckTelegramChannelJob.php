@@ -14,7 +14,7 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Cache;
 use Throwable;
 
-class CheckTelegramChannelJob implements ShouldQueue, ShouldBeUnique
+class CheckTelegramChannelJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
@@ -119,7 +119,7 @@ class CheckTelegramChannelJob implements ShouldQueue, ShouldBeUnique
         $channel->forceFill($updates)->save();
 
         if (($updates['enabled'] ?? true) === false) {
-            $notifier->sendSourceDisabled('telegram', '@'.$channel->username, $message);
+            $notifier->sendSourceDisabled('telegram', $channel->id, '@'.$channel->username, $message);
         }
     }
 

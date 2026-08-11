@@ -209,7 +209,7 @@ docker compose run --rm marketing-php php artisan queue:work --queue=sources --t
 docker compose up -d marketing-sources-queue
 ```
 
-Ошибки сохраняются в `monitored_sites`: `consecutive_failures`, `last_error_at`, `last_error`. После 4 ошибок подряд сайт автоматически отключается и отправляется Telegram-уведомление.
+Ошибки сохраняются в `monitored_sites`: `consecutive_failures`, `last_error_at`, `last_error`. После 4 ошибок подряд сайт автоматически отключается и отправляется Telegram-уведомление с ID сайта.
 
 Запустить scheduler:
 
@@ -229,11 +229,28 @@ docker compose ps marketing-scheduler
 docker compose logs -f marketing-scheduler
 ```
 
+## 12. Включить Отключённый Сайт
+
+Включить сайт по ID:
+
+```bash
+docker compose run --rm marketing-php php artisan sites:enable 42
+```
+
+Или по точному URL:
+
+```bash
+docker compose run --rm marketing-php php artisan sites:enable "https://example.com/"
+```
+
+Команда сбрасывает ошибки и состояние автоматического отключения. Проверка сайта будет поставлена в очередь scheduler при следующем запуске.
+
 ## Список Команд
 
 ```bash
 docker compose run --rm marketing-php php artisan sites:probe "https://example.com/"
 docker compose run --rm marketing-php php artisan sites:add "https://example.com/"
+docker compose run --rm marketing-php php artisan sites:enable 42
 docker compose run --rm marketing-php php artisan sites:refresh-sources --site="example.com"
 docker compose run --rm marketing-php php artisan parser:backfill --limit=500
 docker compose run --rm marketing-php php artisan parser:check

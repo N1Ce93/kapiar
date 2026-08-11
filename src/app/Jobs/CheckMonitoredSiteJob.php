@@ -13,7 +13,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Throwable;
 
-class CheckMonitoredSiteJob implements ShouldQueue, ShouldBeUnique
+class CheckMonitoredSiteJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
@@ -98,7 +98,7 @@ class CheckMonitoredSiteJob implements ShouldQueue, ShouldBeUnique
         $site->forceFill($updates)->save();
 
         if (($updates['enabled'] ?? true) === false) {
-            $notifier->sendSourceDisabled('site', $site->name, $message);
+            $notifier->sendSourceDisabled('site', $site->id, $site->name, $message);
         }
     }
 

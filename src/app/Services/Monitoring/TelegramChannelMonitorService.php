@@ -166,7 +166,9 @@ class TelegramChannelMonitorService
                     'message_id' => $id,
                     'text' => $text,
                     'url' => 'https://t.me/'.$channel->username.'/'.$id,
-                    'posted_at' => isset($message['date']) ? CarbonImmutable::createFromTimestamp((int) $message['date']) : null,
+                    'posted_at' => isset($message['date'])
+                        ? CarbonImmutable::createFromTimestamp((int) $message['date'], config('app.timezone'))
+                        : null,
                 ];
             }
 

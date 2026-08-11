@@ -220,7 +220,7 @@ docker compose up -d marketing-telegram-queue
 
 Не запускайте worker, пока `telegram:status` не показывает успешную авторизацию.
 
-Ошибки сохраняются в `telegram_channels`: `consecutive_failures`, `last_error_at`, `last_error`. После 4 ошибок подряд канал автоматически отключается и отправляется Telegram-уведомление.
+Ошибки сохраняются в `telegram_channels`: `consecutive_failures`, `last_error_at`, `last_error`. После 4 ошибок подряд канал автоматически отключается и отправляется Telegram-уведомление с ID канала.
 
 Запустить scheduler:
 
@@ -240,12 +240,30 @@ docker compose ps marketing-scheduler
 docker compose logs -f marketing-scheduler
 ```
 
+## 10. Включить Отключённый Telegram-Канал
+
+Включить канал по ID:
+
+```bash
+docker compose run --rm marketing-php php artisan telegram-channels:enable 17
+```
+
+Или по username либо URL:
+
+```bash
+docker compose run --rm marketing-php php artisan telegram-channels:enable "@zoda_gov_ua"
+docker compose run --rm marketing-php php artisan telegram-channels:enable "https://t.me/zoda_gov_ua"
+```
+
+Команда сбрасывает ошибки и состояние автоматического отключения, сохраняя `last_message_id`. Канал будет поставлен в очередь scheduler при следующем запуске, если `TELEGRAM_MONITORING_ENABLED=true`.
+
 ## Список Команд
 
 ```bash
 docker compose run --rm -it marketing-php php artisan telegram:login
 docker compose run --rm marketing-php php artisan telegram:status
 docker compose run --rm marketing-php php artisan telegram-channels:add "https://t.me/zoda_gov_ua"
+docker compose run --rm marketing-php php artisan telegram-channels:enable 17
 docker compose run --rm marketing-php php artisan telegram-channels:backfill --limit=500
 docker compose run --rm marketing-php php artisan telegram-channels:check
 docker compose run --rm marketing-php php artisan telegram-channels:dispatch-checks --channels-limit=20 --limit=5

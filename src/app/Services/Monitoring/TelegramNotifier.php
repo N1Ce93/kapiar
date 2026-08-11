@@ -100,11 +100,12 @@ class TelegramNotifier
         return $this->sendMessage($text);
     }
 
-    public function sendSourceDisabled(string $type, string $name, string $reason): bool
+    public function sendSourceDisabled(string $type, int $id, string $name, string $reason): bool
     {
         return $this->sendMessage(trim(sprintf(
-            "Источник автоматически отключён\n\nТип: %s\nИсточник: %s\nПричина: %s",
+            "Источник автоматически отключён\n\nТип: %s\nID: %d\nИсточник: %s\nПричина: %s",
             $type,
+            $id,
             $name,
             mb_substr($this->redact($reason), 0, 1000, 'UTF-8'),
         )));
