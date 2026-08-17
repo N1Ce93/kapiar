@@ -2,8 +2,8 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class TelegramChannel extends Model
 {
@@ -18,9 +18,14 @@ class TelegramChannel extends Model
         'last_checked_at',
         'last_backfilled_at',
         'last_queued_at',
+        'next_check_at',
+        'check_pending_at',
+        'check_claim_token',
         'last_success_at',
         'last_error_at',
         'last_error',
+        'last_error_type',
+        'paused_at',
         'disabled_at',
         'disabled_reason',
     ];
@@ -34,8 +39,11 @@ class TelegramChannel extends Model
             'last_checked_at' => 'datetime',
             'last_backfilled_at' => 'datetime',
             'last_queued_at' => 'datetime',
+            'next_check_at' => 'datetime',
+            'check_pending_at' => 'datetime',
             'last_success_at' => 'datetime',
             'last_error_at' => 'datetime',
+            'paused_at' => 'datetime',
             'disabled_at' => 'datetime',
         ];
     }

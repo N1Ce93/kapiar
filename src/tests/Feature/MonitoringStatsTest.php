@@ -262,4 +262,28 @@ class MonitoringStatsTest extends TestCase
             ->assertJsonPath('has_more', false)
             ->assertJsonPath('items.0.title', 'Telegram Post 1');
     }
+
+    public function test_sites_page_shows_paused_status_and_next_check_date(): void
+    {
+        Carbon::setTestNow('2026-08-17 12:00:00');
+        MonitoredSite::create([
+            'name' => 'Paused Site',
+            'base_url' => 'https://paused.example.com',
+            'source_type' => 'html',
+            'enabled' => true,
+            'consecutive_failures' => 3,
+            'next_check_at' => '2026-08-18 12:00:00',
+            'last_error_at' => '2026-08-17 12:00:00',
+            'last_error' => 'Connection failed',
+            'last_error_type' => 'temporary',
+            'paused_at' => '2026-08-17 12:00:00',
+        ]);
+
+        $this->withSession(['site_access_granted' => true])
+            ->get('/sites')
+            ->assertOk()
+            ->assertSee('Призупинено до 18.08.2026 12:00')
+            ->assertSee('Наступна перевірка')
+            ->assertSee('Тимчасова');
+    }
 }

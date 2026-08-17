@@ -84,4 +84,28 @@ class TelegramNotifierTest extends TestCase
         Http::assertSent(fn ($request): bool => $request['text'] === "Источник автоматически отключён\n\nТип: site\nID: 42\nИсточник: Example News\nПричина: Connection failed");
         Http::assertSent(fn ($request): bool => $request['text'] === "Источник автоматически отключён\n\nТип: telegram\nID: 17\nИсточник: @test_channel\nПричина: Authorization failed");
     }
+
+    public function test_it_sends_pause_and_recovery_notifications(): void
+    {
+        config([
+            'app.timezone' => 'Europe/Kyiv',
+            'services.telegram.bot_token' => 'test-token',
+            'services.telegram.chat_id' => '-1002354975882',
+        ]);
+        Http::fake(['api.telegram.org/*' => Http::response(['ok' => true])]);
+        $notifier = new TelegramNotifier;
+
+        $this->assertTrue($notifier->sendSourcePaused(
+            'site',
+            42,
+            'Example News',
+            Carbon::parse('2026-08-18 12:00:00', 'Europe/Kyiv'),
+            'Connection failed',
+        ));
+        $this->assertTrue($notifier->sendSourceRecovered('site', 42, 'Example News'));
+
+        Http::assertSentCount(2);
+        Http::assertSent(fn ($request): bool => str_contains($request['text'], 'Следующая проверка: 2026-08-18 12:00'));
+        Http::assertSent(fn ($request): bool => $request['text'] === "Проверка источника восстановлена\n\nТип: site\nID: 42\nИсточник: Example News");
+    }
 }

@@ -51,22 +51,39 @@ class SitesEnableCommand extends Command
         }
 
         if ($site->enabled) {
+            if ((int) $site->consecutive_failures >= 3) {
+                $site->forceFill($this->enabledState())->save();
+                $this->info("Site monitoring resumed: {$site->name} (ID: {$site->id})");
+
+                return self::SUCCESS;
+            }
+
             $this->warn("Site is already enabled: {$site->name} (ID: {$site->id})");
 
             return self::SUCCESS;
         }
 
-        $site->forceFill([
-            'enabled' => true,
-            'consecutive_failures' => 0,
-            'last_error_at' => null,
-            'last_error' => null,
-            'disabled_at' => null,
-            'disabled_reason' => null,
-        ])->save();
+        $site->forceFill($this->enabledState())->save();
 
         $this->info("Site enabled: {$site->name} (ID: {$site->id})");
 
         return self::SUCCESS;
+    }
+
+    private function enabledState(): array
+    {
+        return [
+            'enabled' => true,
+            'consecutive_failures' => 0,
+            'next_check_at' => now(),
+            'check_pending_at' => null,
+            'check_claim_token' => null,
+            'last_error_at' => null,
+            'last_error' => null,
+            'last_error_type' => null,
+            'paused_at' => null,
+            'disabled_at' => null,
+            'disabled_reason' => null,
+        ];
     }
 }

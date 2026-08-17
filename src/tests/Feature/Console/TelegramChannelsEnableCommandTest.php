@@ -40,8 +40,10 @@ class TelegramChannelsEnableCommandTest extends TestCase
         $this->assertSame(0, $channel->consecutive_failures);
         $this->assertNull($channel->last_error_at);
         $this->assertNull($channel->last_error);
+        $this->assertNull($channel->last_error_type);
         $this->assertNull($channel->disabled_at);
         $this->assertNull($channel->disabled_reason);
+        $this->assertNotNull($channel->next_check_at);
         $this->assertSame(12345, $channel->last_message_id);
         $this->assertSame('@test_channel', $channel->telegram_peer);
         $this->assertSame('2026-08-10 10:00:00', $channel->last_checked_at?->format('Y-m-d H:i:s'));
@@ -84,6 +86,29 @@ class TelegramChannelsEnableCommandTest extends TestCase
 
         $this->assertSame(2, $channel->consecutive_failures);
         $this->assertSame('Temporary error', $channel->last_error);
+    }
+
+    public function test_it_resumes_an_enabled_paused_channel(): void
+    {
+        $channel = TelegramChannel::create([
+            'title' => 'Test Channel',
+            'username' => 'test_channel',
+            'url' => 'https://t.me/test_channel',
+            'enabled' => true,
+            'consecutive_failures' => 3,
+            'next_check_at' => now()->addDay(),
+            'last_error' => 'Temporary error',
+            'last_error_type' => 'temporary',
+        ]);
+
+        $this->artisan('telegram-channels:enable', ['channel' => (string) $channel->id])
+            ->expectsOutput("Telegram channel monitoring resumed: @test_channel (ID: {$channel->id})")
+            ->assertSuccessful();
+
+        $channel->refresh();
+        $this->assertSame(0, $channel->consecutive_failures);
+        $this->assertNull($channel->last_error);
+        $this->assertTrue($channel->next_check_at->lessThanOrEqualTo(now()));
     }
 
     public function test_it_fails_for_invalid_or_unknown_channel(): void

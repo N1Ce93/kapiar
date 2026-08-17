@@ -200,7 +200,7 @@ docker compose run --rm marketing-php php artisan telegram-channels:dispatch-che
 
 ## 9. Автоматическая Проверка
 
-В `src/routes/console.php` настроена постановка задач в очередь каждые 10 минут:
+В `src/routes/console.php` настроен поиск готовых к проверке каналов каждые 10 минут:
 
 ```php
 Schedule::command('telegram-channels:dispatch-checks --channels-limit=20 --limit=5')->everyTenMinutes()->withoutOverlapping();
@@ -220,7 +220,9 @@ docker compose up -d marketing-telegram-queue
 
 Не запускайте worker, пока `telegram:status` не показывает успешную авторизацию.
 
-Ошибки сохраняются в `telegram_channels`: `consecutive_failures`, `last_error_at`, `last_error`. После 4 ошибок подряд канал автоматически отключается и отправляется Telegram-уведомление с ID канала.
+Scheduler выбирает только каналы с пустым или наступившим `next_check_at`. После успешной проверки следующая назначается через 10 минут. После первой ошибки повтор выполняется через 15 минут, после второй — через час, после третьей канал приостанавливается на 24 часа.
+
+Временные ошибки не отключают канал. Ошибки удалённого, закрытого или недействительного канала считаются постоянными и приводят к отключению только после повторного подтверждения спустя 24 часа. Системные ошибки авторизации и MadelineProto открывают общий circuit breaker и не увеличивают счётчик конкретного канала.
 
 Запустить scheduler:
 
@@ -255,7 +257,7 @@ docker compose run --rm marketing-php php artisan telegram-channels:enable "@zod
 docker compose run --rm marketing-php php artisan telegram-channels:enable "https://t.me/zoda_gov_ua"
 ```
 
-Команда сбрасывает ошибки и состояние автоматического отключения, сохраняя `last_message_id`. Канал будет поставлен в очередь scheduler при следующем запуске, если `TELEGRAM_MONITORING_ENABLED=true`.
+Команда сбрасывает ошибки и паузу, сохраняя `last_message_id`, и назначает проверку на ближайший запуск scheduler. Этой же командой можно досрочно возобновить уже включённый, но приостановленный канал. Для постановки job требуется `TELEGRAM_MONITORING_ENABLED=true`.
 
 ## Список Команд
 

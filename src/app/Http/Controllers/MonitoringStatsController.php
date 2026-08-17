@@ -139,9 +139,12 @@ class MonitoringStatsController extends Controller
                 'enabled',
                 'consecutive_failures',
                 'last_checked_at',
+                'next_check_at',
                 'last_success_at',
                 'last_error_at',
                 'last_error',
+                'last_error_type',
+                'paused_at',
                 'disabled_at',
                 'disabled_reason',
             ])
@@ -156,9 +159,11 @@ class MonitoringStatsController extends Controller
                     'status' => $this->sourceStatus($site),
                     'consecutive_failures' => (int) $site->consecutive_failures,
                     'last_checked_at' => $this->formatDate($site->last_checked_at),
+                    'next_check_at' => $this->formatDate($site->next_check_at),
                     'last_success_at' => $this->formatDate($site->last_success_at),
                     'last_error_at' => $this->formatDate($site->last_error_at),
                     'last_error' => $site->last_error,
+                    'last_error_type' => $this->errorTypeLabel($site->last_error_type),
                     'disabled_at' => $this->formatDate($site->disabled_at),
                     'disabled_reason' => $site->disabled_reason,
                     'posts' => $posts['items'],
@@ -191,9 +196,12 @@ class MonitoringStatsController extends Controller
                 'enabled',
                 'consecutive_failures',
                 'last_checked_at',
+                'next_check_at',
                 'last_success_at',
                 'last_error_at',
                 'last_error',
+                'last_error_type',
+                'paused_at',
                 'disabled_at',
                 'disabled_reason',
             ])
@@ -208,9 +216,11 @@ class MonitoringStatsController extends Controller
                     'status' => $this->sourceStatus($channel),
                     'consecutive_failures' => (int) $channel->consecutive_failures,
                     'last_checked_at' => $this->formatDate($channel->last_checked_at),
+                    'next_check_at' => $this->formatDate($channel->next_check_at),
                     'last_success_at' => $this->formatDate($channel->last_success_at),
                     'last_error_at' => $this->formatDate($channel->last_error_at),
                     'last_error' => $channel->last_error,
+                    'last_error_type' => $this->errorTypeLabel($channel->last_error_type),
                     'disabled_at' => $this->formatDate($channel->disabled_at),
                     'disabled_reason' => $channel->disabled_reason,
                     'posts' => $posts['items'],
@@ -292,11 +302,27 @@ class MonitoringStatsController extends Controller
             return ['label' => 'Відключено', 'class' => 'disabled'];
         }
 
+        if ($source->paused_at !== null) {
+            return [
+                'label' => 'Призупинено'.($source->next_check_at ? ' до '.$this->formatDate($source->next_check_at) : ''),
+                'class' => 'paused',
+            ];
+        }
+
         if ($source->last_error_at && (! $source->last_success_at || $source->last_error_at->greaterThan($source->last_success_at))) {
             return ['label' => 'Помилка', 'class' => 'error'];
         }
 
         return ['label' => 'Активно', 'class' => 'active'];
+    }
+
+    private function errorTypeLabel(?string $type): ?string
+    {
+        return match ($type) {
+            'temporary' => 'Тимчасова',
+            'permanent' => 'Постійна',
+            default => null,
+        };
     }
 
     private function telegramMessageTitle(TelegramMessage $message): string

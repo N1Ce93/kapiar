@@ -4,10 +4,12 @@ namespace App\Console\Commands;
 
 use App\Jobs\CheckMonitoredSiteJob;
 use App\Models\MonitoredSite;
+use App\Services\Monitoring\SourceHealthService;
 use App\Services\Monitoring\UrlHelper;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
+use Throwable;
 
 #[Signature('sources:dispatch-checks
     {--site= : Site id, name, host, or base URL}
@@ -17,7 +19,7 @@ use Illuminate\Console\Command;
 #[Description('Dispatch monitored site checks to the sources queue')]
 class SourcesDispatchChecksCommand extends Command
 {
-    public function handle(): int
+    public function handle(SourceHealthService $healthService): int
     {
         $sites = $this->sites();
         $limit = max(1, (int) $this->option('limit'));
@@ -28,18 +30,34 @@ class SourcesDispatchChecksCommand extends Command
             return self::SUCCESS;
         }
 
-        foreach ($sites as $site) {
-            $site->forceFill(['last_queued_at' => now()])->save();
+        $dispatched = 0;
+        $bypassSchedule = $this->option('site') !== null;
 
-            CheckMonitoredSiteJob::dispatch(
-                siteId: $site->id,
-                limit: $limit,
-                analyze: true,
-                notify: ! $this->option('no-notify'),
-            );
+        foreach ($sites as $site) {
+            $claimToken = $healthService->reserveCheck($site, $bypassSchedule);
+
+            if ($claimToken === null) {
+                continue;
+            }
+
+            try {
+                CheckMonitoredSiteJob::dispatch(
+                    siteId: $site->id,
+                    limit: $limit,
+                    analyze: true,
+                    notify: ! $this->option('no-notify'),
+                    claimToken: $claimToken,
+                );
+            } catch (Throwable $exception) {
+                $healthService->releaseCheck($site, $claimToken);
+
+                throw $exception;
+            }
+
+            $dispatched++;
         }
 
-        $this->info('Selected site check jobs: '.$sites->count());
+        $this->info('Selected site check jobs: '.$dispatched);
 
         return self::SUCCESS;
     }
@@ -50,7 +68,11 @@ class SourcesDispatchChecksCommand extends Command
         $site = $this->option('site');
 
         if (! $site) {
-            $query->orderBy('last_queued_at')->orderBy('last_checked_at')->orderBy('id');
+            $query->where(function ($query): void {
+                $query->whereNull('next_check_at')->orWhere('next_check_at', '<=', now());
+            })->where(function ($query): void {
+                $query->whereNull('check_pending_at')->orWhere('check_pending_at', '<=', now()->subHours(SourceHealthService::CHECK_CLAIM_TIMEOUT_HOURS));
+            })->orderBy('next_check_at')->orderBy('last_queued_at')->orderBy('id');
 
             if ($this->option('sites-limit')) {
                 $query->limit(max(1, (int) $this->option('sites-limit')));

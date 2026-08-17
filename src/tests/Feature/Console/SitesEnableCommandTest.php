@@ -39,8 +39,10 @@ class SitesEnableCommandTest extends TestCase
         $this->assertSame(0, $site->consecutive_failures);
         $this->assertNull($site->last_error_at);
         $this->assertNull($site->last_error);
+        $this->assertNull($site->last_error_type);
         $this->assertNull($site->disabled_at);
         $this->assertNull($site->disabled_reason);
+        $this->assertNotNull($site->next_check_at);
         $this->assertSame('2026-08-10 10:00:00', $site->last_checked_at?->format('Y-m-d H:i:s'));
         $this->assertSame('2026-08-09 10:00:00', $site->last_backfilled_at?->format('Y-m-d H:i:s'));
         $this->assertSame('2026-08-10 09:50:00', $site->last_queued_at?->format('Y-m-d H:i:s'));
@@ -83,6 +85,29 @@ class SitesEnableCommandTest extends TestCase
 
         $this->assertSame(2, $site->consecutive_failures);
         $this->assertSame('Temporary error', $site->last_error);
+    }
+
+    public function test_it_resumes_an_enabled_paused_site(): void
+    {
+        $site = MonitoredSite::create([
+            'name' => 'Example News',
+            'base_url' => 'https://example.com/',
+            'source_type' => 'html',
+            'enabled' => true,
+            'consecutive_failures' => 3,
+            'next_check_at' => now()->addDay(),
+            'last_error' => 'Temporary error',
+            'last_error_type' => 'temporary',
+        ]);
+
+        $this->artisan('sites:enable', ['site' => (string) $site->id])
+            ->expectsOutput("Site monitoring resumed: Example News (ID: {$site->id})")
+            ->assertSuccessful();
+
+        $site->refresh();
+        $this->assertSame(0, $site->consecutive_failures);
+        $this->assertNull($site->last_error);
+        $this->assertTrue($site->next_check_at->lessThanOrEqualTo(now()));
     }
 
     public function test_it_fails_for_invalid_or_unknown_site(): void

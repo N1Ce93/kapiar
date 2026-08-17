@@ -200,6 +200,11 @@
                 color: #9b5b00;
             }
 
+            .status-badge.paused {
+                background: #e8efff;
+                color: #315ca8;
+            }
+
             .status-badge.disabled {
                 background: #ffe8e8;
                 color: #a62020;
@@ -494,6 +499,10 @@
                                                                 <strong>{{ $row['last_checked_at'] ?? 'Немає даних' }}</strong>
                                                             </div>
                                                             <div class="status-item">
+                                                                <span>Наступна перевірка</span>
+                                                                <strong>{{ $row['next_check_at'] ?? 'Не заплановано' }}</strong>
+                                                            </div>
+                                                            <div class="status-item">
                                                                 <span>Останній успіх</span>
                                                                 <strong>{{ $row['last_success_at'] ?? 'Немає даних' }}</strong>
                                                             </div>
@@ -504,6 +513,10 @@
                                                             <div class="status-item">
                                                                 <span>Збоїв підряд</span>
                                                                 <strong>{{ $row['consecutive_failures'] }}</strong>
+                                                            </div>
+                                                            <div class="status-item">
+                                                                <span>Тип помилки</span>
+                                                                <strong>{{ $row['last_error_type'] ?? 'Немає' }}</strong>
                                                             </div>
                                                             <div class="status-item">
                                                                 <span>Відключено</span>

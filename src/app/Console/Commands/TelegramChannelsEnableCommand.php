@@ -47,22 +47,39 @@ class TelegramChannelsEnableCommand extends Command
         }
 
         if ($channel->enabled) {
+            if ((int) $channel->consecutive_failures >= 3) {
+                $channel->forceFill($this->enabledState())->save();
+                $this->info("Telegram channel monitoring resumed: @{$channel->username} (ID: {$channel->id})");
+
+                return self::SUCCESS;
+            }
+
             $this->warn("Telegram channel is already enabled: @{$channel->username} (ID: {$channel->id})");
 
             return self::SUCCESS;
         }
 
-        $channel->forceFill([
-            'enabled' => true,
-            'consecutive_failures' => 0,
-            'last_error_at' => null,
-            'last_error' => null,
-            'disabled_at' => null,
-            'disabled_reason' => null,
-        ])->save();
+        $channel->forceFill($this->enabledState())->save();
 
         $this->info("Telegram channel enabled: @{$channel->username} (ID: {$channel->id})");
 
         return self::SUCCESS;
+    }
+
+    private function enabledState(): array
+    {
+        return [
+            'enabled' => true,
+            'consecutive_failures' => 0,
+            'next_check_at' => now(),
+            'check_pending_at' => null,
+            'check_claim_token' => null,
+            'last_error_at' => null,
+            'last_error' => null,
+            'last_error_type' => null,
+            'paused_at' => null,
+            'disabled_at' => null,
+            'disabled_reason' => null,
+        ];
     }
 }

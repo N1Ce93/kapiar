@@ -191,7 +191,7 @@ docker compose run --rm marketing-php php artisan sites:refresh-sources --dry-ru
 
 ## 11. Автоматическая Проверка
 
-В `src/routes/console.php` настроена постановка задач в очередь каждые 10 минут:
+В `src/routes/console.php` настроен поиск готовых к проверке сайтов каждые 10 минут:
 
 ```php
 Schedule::command('sources:dispatch-checks --sites-limit=15 --limit=20')->everyTenMinutes()->withoutOverlapping();
@@ -209,7 +209,9 @@ docker compose run --rm marketing-php php artisan queue:work --queue=sources --t
 docker compose up -d marketing-sources-queue
 ```
 
-Ошибки сохраняются в `monitored_sites`: `consecutive_failures`, `last_error_at`, `last_error`. После 4 ошибок подряд сайт автоматически отключается и отправляется Telegram-уведомление с ID сайта.
+Scheduler выбирает только сайты с пустым или наступившим `next_check_at`. После успешной проверки следующая назначается через 30 минут. После первой ошибки повтор выполняется через 15 минут, после второй — через час, после третьей сайт приостанавливается на 24 часа.
+
+Временные ошибки (`429`, `5xx`, timeout, DNS) продлевают суточную паузу и не отключают сайт. HTTP `404` или `410` считается постоянной ошибкой; сайт отключается только если она повторно подтверждена спустя 24 часа. При паузе, восстановлении и окончательном отключении отправляются Telegram-уведомления.
 
 Запустить scheduler:
 
@@ -243,7 +245,7 @@ docker compose run --rm marketing-php php artisan sites:enable 42
 docker compose run --rm marketing-php php artisan sites:enable "https://example.com/"
 ```
 
-Команда сбрасывает ошибки и состояние автоматического отключения. Проверка сайта будет поставлена в очередь scheduler при следующем запуске.
+Команда сбрасывает ошибки и паузу, назначая проверку на ближайший запуск scheduler. Этой же командой можно досрочно возобновить уже включённый, но приостановленный сайт.
 
 ## Список Команд
 

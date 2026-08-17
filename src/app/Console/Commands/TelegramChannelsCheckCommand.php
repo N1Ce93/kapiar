@@ -2,7 +2,9 @@
 
 namespace App\Console\Commands;
 
+use App\Jobs\CheckTelegramChannelJob;
 use App\Models\TelegramChannel;
+use App\Services\Monitoring\SourceHealthService;
 use App\Services\Monitoring\TelegramChannelMonitorService;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
@@ -18,7 +20,7 @@ use Throwable;
 #[Description('Check Telegram channels for new posts and notify on keyword hits')]
 class TelegramChannelsCheckCommand extends Command
 {
-    public function handle(TelegramChannelMonitorService $monitorService): int
+    public function handle(TelegramChannelMonitorService $monitorService, SourceHealthService $healthService): int
     {
         $channels = $this->channels();
         $limit = max(1, (int) $this->option('limit'));
@@ -38,26 +40,54 @@ class TelegramChannelsCheckCommand extends Command
             }
 
             $failed = 0;
+            $bypassSchedule = $this->option('channel') !== null;
 
             foreach ($channels as $channel) {
-                $this->info('Checking @'.$channel->username.'...');
+                $claimToken = $healthService->reserveCheck($channel, $bypassSchedule);
 
-                try {
-                    $stats = $monitorService->ingestChannel($channel, $limit, backfill: false, analyze: true, notify: ! $this->option('no-notify'));
-                } catch (Throwable $exception) {
-                    $failed++;
-                    $this->error($this->telegramError($exception));
+                if ($claimToken === null) {
+                    $this->warn('Telegram channel check is already pending or not due: @'.$channel->username);
+
                     continue;
                 }
 
-                $this->table(['Found', 'New', 'Already known', 'Analyzed', 'Hits', 'Telegram sent'], [[
-                    $stats['found'],
-                    $stats['created'],
-                    $stats['skipped'],
-                    $stats['analyzed'],
-                    $stats['hits'],
-                    $stats['sent'],
-                ]]);
+                $this->info('Checking @'.$channel->username.'...');
+
+                try {
+                    try {
+                        $stats = $monitorService->ingestChannel($channel, $limit, backfill: false, analyze: true, notify: ! $this->option('no-notify'));
+                    } catch (Throwable $exception) {
+                        $failed++;
+                        $systemicFailure = $healthService->isSystemicTelegramFailure($exception);
+
+                        if ($systemicFailure) {
+                            Cache::put(CheckTelegramChannelJob::CIRCUIT_CACHE_KEY, $healthService->errorMessage($exception), now()->addMinutes(10));
+                        } else {
+                            $healthService->recordFailure($channel, $exception, $claimToken);
+                        }
+
+                        $this->error($this->telegramError($exception));
+
+                        if ($systemicFailure) {
+                            break;
+                        }
+
+                        continue;
+                    }
+
+                    $healthService->recordSuccess($channel, $claimToken);
+
+                    $this->table(['Found', 'New', 'Already known', 'Analyzed', 'Hits', 'Telegram sent'], [[
+                        $stats['found'],
+                        $stats['created'],
+                        $stats['skipped'],
+                        $stats['analyzed'],
+                        $stats['hits'],
+                        $stats['sent'],
+                    ]]);
+                } finally {
+                    $healthService->releaseCheck($channel, $claimToken);
+                }
             }
 
             return $failed > 0 ? self::FAILURE : self::SUCCESS;
@@ -72,7 +102,11 @@ class TelegramChannelsCheckCommand extends Command
         $channel = $this->option('channel');
 
         if (! $channel) {
-            $query->orderBy('last_checked_at')->orderBy('id');
+            $query->where(function ($query): void {
+                $query->whereNull('next_check_at')->orWhere('next_check_at', '<=', now());
+            })->where(function ($query): void {
+                $query->whereNull('check_pending_at')->orWhere('check_pending_at', '<=', now()->subHours(SourceHealthService::CHECK_CLAIM_TIMEOUT_HOURS));
+            })->orderBy('next_check_at')->orderBy('id');
 
             if ($this->option('channels-limit')) {
                 $query->limit(max(1, (int) $this->option('channels-limit')));
