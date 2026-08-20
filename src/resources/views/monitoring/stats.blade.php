@@ -117,19 +117,79 @@
             }
 
             .toolbar {
-                display: flex;
-                justify-content: space-between;
+                display: grid;
                 gap: 18px;
-                align-items: center;
                 padding: 20px;
                 border-bottom: 1px solid var(--line);
                 background: rgba(234, 246, 255, .74);
+            }
+
+            .filter-group {
+                display: grid;
+                gap: 10px;
             }
 
             .toolbar-title {
                 margin: 0;
                 font-size: 15px;
                 font-weight: 800;
+            }
+
+            .day-filter {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 10px;
+                align-items: end;
+            }
+
+            .day-field {
+                display: grid;
+                gap: 5px;
+            }
+
+            .day-field span {
+                color: var(--muted);
+                font-size: 12px;
+                font-weight: 800;
+            }
+
+            .day-field select {
+                min-width: 112px;
+                min-height: 40px;
+                padding: 0 34px 0 12px;
+                border: 1px solid var(--line);
+                border-radius: 12px;
+                background: white;
+                color: var(--text);
+                font: inherit;
+                font-size: 14px;
+                font-weight: 700;
+            }
+
+            .filter-button, .filter-reset {
+                display: inline-flex;
+                min-height: 40px;
+                padding: 0 15px;
+                align-items: center;
+                justify-content: center;
+                border-radius: 12px;
+                font: inherit;
+                font-size: 14px;
+                font-weight: 800;
+            }
+
+            .filter-button {
+                border: 0;
+                background: var(--accent-dark);
+                color: white;
+                cursor: pointer;
+            }
+
+            .filter-reset {
+                border: 1px solid var(--line);
+                background: rgba(255, 255, 255, .78);
+                color: var(--muted);
+                text-decoration: none;
             }
 
             .table-wrap {
@@ -421,6 +481,10 @@
                     align-items: flex-start;
                 }
 
+                .day-filter, .day-field, .day-field select, .filter-button, .filter-reset {
+                    width: 100%;
+                }
+
                 .status-grid {
                     grid-template-columns: 1fr;
                 }
@@ -435,28 +499,59 @@
         <main class="page">
             <section class="hero">
                 <div>
-                    <p class="eyebrow">Статистика за місяць</p>
+                    <p class="eyebrow">Статистика за період</p>
                     <h1>{{ $title }}</h1>
                     <p class="description">{{ $description }}</p>
                 </div>
 
                 <nav class="tabs" aria-label="Розділи моніторингу">
-                    <a class="pill {{ $active === 'sites' ? 'active' : '' }}" href="{{ route('monitoring.sites', ['month' => $selectedMonth]) }}">Сайти</a>
-                    <a class="pill {{ $active === 'telegram' ? 'active' : '' }}" href="{{ route('monitoring.telegram', ['month' => $selectedMonth]) }}">Telegram</a>
+                    <a class="pill {{ $active === 'sites' ? 'active' : '' }}" href="{{ route('monitoring.sites', $periodQuery) }}">Сайти</a>
+                    <a class="pill {{ $active === 'telegram' ? 'active' : '' }}" href="{{ route('monitoring.telegram', $periodQuery) }}">Telegram</a>
                 </nav>
             </section>
 
             <section class="panel">
                 <div class="toolbar">
-                    <p class="toolbar-title">Вибір місяця: тільки останні 6 місяців</p>
-                    <nav class="months" aria-label="Місяці">
-                        @foreach ($months as $month)
-                            <a
-                                class="pill {{ $selectedMonth === $month['key'] ? 'active' : '' }}"
-                                href="{{ route($active === 'sites' ? 'monitoring.sites' : 'monitoring.telegram', ['month' => $month['key']]) }}"
-                            >{{ $month['label'] }}</a>
-                        @endforeach
-                    </nav>
+                    <div class="filter-group">
+                        <p class="toolbar-title">Вибір місяця: тільки останні 6 місяців</p>
+                        <nav class="months" aria-label="Місяці">
+                            @foreach ($months as $month)
+                                <a
+                                    class="pill {{ $selectedMonth === $month['key'] ? 'active' : '' }}"
+                                    href="{{ route($active === 'sites' ? 'monitoring.sites' : 'monitoring.telegram', ['month' => $month['key']]) }}"
+                                >{{ $month['label'] }}</a>
+                            @endforeach
+                        </nav>
+                    </div>
+
+                    <div class="filter-group">
+                        <p class="toolbar-title">Додатковий фільтр за днями</p>
+                        <form class="day-filter" method="GET" action="{{ route($active === 'sites' ? 'monitoring.sites' : 'monitoring.telegram') }}">
+                            <input type="hidden" name="month" value="{{ $selectedMonth }}">
+                            <label class="day-field">
+                                <span>З дня</span>
+                                <select name="from_day" required>
+                                    <option value="" disabled @selected($selectedFromDay === null)>Оберіть день</option>
+                                    @for ($day = 1; $day <= $daysInMonth; $day++)
+                                        <option value="{{ $day }}" @selected($selectedFromDay === $day)>{{ $day }}</option>
+                                    @endfor
+                                </select>
+                            </label>
+                            <label class="day-field">
+                                <span>По день</span>
+                                <select name="to_day" required>
+                                    <option value="" disabled @selected($selectedToDay === null)>Оберіть день</option>
+                                    @for ($day = 1; $day <= $daysInMonth; $day++)
+                                        <option value="{{ $day }}" @selected($selectedToDay === $day)>{{ $day }}</option>
+                                    @endfor
+                                </select>
+                            </label>
+                            <button class="filter-button" type="submit">Застосувати</button>
+                            @if ($dayFilterActive)
+                                <a class="filter-reset" href="{{ route($active === 'sites' ? 'monitoring.sites' : 'monitoring.telegram', ['month' => $selectedMonth]) }}">Весь місяць</a>
+                            @endif
+                        </form>
+                    </div>
                 </div>
 
                 @if ($rows->isEmpty())
@@ -485,7 +580,13 @@
                                                     <span class="status-badge {{ $row['status']['class'] }}">{{ $row['status']['label'] }}</span>
                                                 </div>
                                                 <a class="source-url" href="{{ $row['url'] }}" target="_blank" rel="noopener noreferrer">{{ $row['url'] }}</a>
-                                                <details class="source-details" data-posts-url="{{ $postsUrl }}" data-month="{{ $selectedMonth }}">
+                                                <details
+                                                    class="source-details"
+                                                    data-posts-url="{{ $postsUrl }}"
+                                                    data-month="{{ $selectedMonth }}"
+                                                    data-from-day="{{ $selectedFromDay }}"
+                                                    data-to-day="{{ $selectedToDay }}"
+                                                >
                                                     <summary class="details-toggle">Статус і останні пости</summary>
 
                                                     <div class="status-panel">
@@ -540,7 +641,7 @@
 
                                                         <div class="posts-block">
                                                             <div class="posts-head">
-                                                                <strong>Останні пости зі згадками за вибраний місяць</strong>
+                                                                <strong>Останні пости зі згадками за {{ $periodLabel }}</strong>
                                                                 <span><span class="posts-loaded">{{ count($row['posts']) }}</span> з {{ $row['posts_count'] }}</span>
                                                             </div>
 
@@ -558,7 +659,7 @@
                                                                         </div>
                                                                     @endif
                                                                 @empty
-                                                                    <div class="post-empty">За вибраний місяць постів немає.</div>
+                                                                    <div class="post-empty">За {{ $periodLabel }} постів немає.</div>
                                                                 @endforelse
                                                             </div>
 
@@ -579,7 +680,7 @@
                 @endif
 
                 <div class="total">
-                    <span>Загальна кількість згадок за вибраний місяць</span>
+                    <span>Загальна кількість згадок за {{ $periodLabel }}</span>
                     <strong>{{ number_format($totalMentions, 0, ',', ' ') }}</strong>
                 </div>
             </section>
@@ -599,6 +700,12 @@
                 const url = new URL(details.dataset.postsUrl, window.location.origin);
 
                 url.searchParams.set('month', details.dataset.month);
+
+                if (details.dataset.fromDay && details.dataset.toDay) {
+                    url.searchParams.set('from_day', details.dataset.fromDay);
+                    url.searchParams.set('to_day', details.dataset.toDay);
+                }
+
                 url.searchParams.set('offset', button.dataset.offset || '0');
 
                 const defaultLabel = button.textContent;

@@ -263,6 +263,173 @@ class MonitoringStatsTest extends TestCase
             ->assertJsonPath('items.0.title', 'Telegram Post 1');
     }
 
+    public function test_sites_day_range_filters_counts_initial_posts_and_loaded_posts(): void
+    {
+        Carbon::setTestNow('2026-08-07 12:00:00');
+
+        $site = MonitoredSite::create([
+            'name' => 'Daily Site',
+            'base_url' => 'https://daily.example.com',
+            'source_type' => 'html',
+            'enabled' => true,
+        ]);
+        $keyword = Keyword::create(['phrase' => 'match']);
+        $articles = [
+            ['Before range', '2026-08-01 23:59:59'],
+            ['Range Post 2', '2026-08-02 00:00:00'],
+            ['Range Post 3', '2026-08-03 10:00:00'],
+            ['Range Post 4', '2026-08-04 10:00:00'],
+            ['Range Post 5', '2026-08-05 23:59:59'],
+            ['After range', '2026-08-06 00:00:00'],
+        ];
+
+        foreach ($articles as [$title, $publishedAt]) {
+            $article = Article::create([
+                'monitored_site_id' => $site->id,
+                'url' => 'https://daily.example.com/'.str($title)->slug(),
+                'title' => $title,
+                'published_at' => $publishedAt,
+            ]);
+            ArticleKeywordHit::create(['article_id' => $article->id, 'keyword_id' => $keyword->id, 'matched_text' => 'match']);
+        }
+
+        $response = $this
+            ->withSession(['site_access_granted' => true])
+            ->get('/sites?month=2026-08&from_day=2&to_day=5');
+
+        $response
+            ->assertOk()
+            ->assertViewHas('totalMentions', 4)
+            ->assertViewHas('dayFilterActive', true)
+            ->assertViewHas('periodLabel', '02.08.2026 - 05.08.2026')
+            ->assertViewHas('rows', function ($rows): bool {
+                $row = $rows->firstWhere('name', 'Daily Site');
+
+                return $row['mentions_count'] === 4
+                    && $row['posts_count'] === 4
+                    && $row['posts_has_more'] === true;
+            })
+            ->assertSee('Range Post 5')
+            ->assertSee('Range Post 4')
+            ->assertSee('Range Post 3')
+            ->assertDontSee('Range Post 2')
+            ->assertDontSee('Before range')
+            ->assertDontSee('After range')
+            ->assertSee('data-from-day="2"', false)
+            ->assertSee('data-to-day="5"', false)
+            ->assertSee('telegram?month=2026-08&amp;from_day=2&amp;to_day=5', false)
+            ->assertDontSee('month=2026-07&amp;from_day=2', false);
+
+        $this
+            ->withSession(['site_access_granted' => true])
+            ->getJson('/sites/'.$site->id.'/posts?month=2026-08&from_day=2&to_day=5&offset=3')
+            ->assertOk()
+            ->assertJsonPath('total', 4)
+            ->assertJsonPath('has_more', false)
+            ->assertJsonCount(1, 'items')
+            ->assertJsonPath('items.0.title', 'Range Post 2');
+    }
+
+    public function test_telegram_day_range_filters_posted_and_fallback_dates_in_loaded_posts(): void
+    {
+        Carbon::setTestNow('2026-08-07 12:00:00');
+
+        $channel = TelegramChannel::create([
+            'title' => 'Daily Channel',
+            'username' => 'daily_channel',
+            'url' => 'https://t.me/daily_channel',
+            'telegram_peer' => '@daily_channel',
+            'enabled' => true,
+        ]);
+        $keyword = Keyword::create(['phrase' => 'match']);
+        $messages = [
+            ['Before range', '2026-08-01 23:59:59', false],
+            ['Range Message 2', '2026-08-02 00:00:00', false],
+            ['Range Message 3', '2026-08-03 10:00:00', false],
+            ['Fallback Message 4', '2026-08-04 10:00:00', true],
+            ['Range Message 5', '2026-08-05 23:59:59', false],
+            ['After range', '2026-08-06 00:00:00', false],
+        ];
+
+        foreach ($messages as $index => [$text, $date, $useCreatedAt]) {
+            $message = TelegramMessage::create([
+                'telegram_channel_id' => $channel->id,
+                'message_id' => $index + 1,
+                'text' => $text,
+                'url' => 'https://t.me/daily_channel/'.($index + 1),
+                'posted_at' => $useCreatedAt ? null : $date,
+            ]);
+
+            if ($useCreatedAt) {
+                $message->forceFill(['created_at' => $date, 'updated_at' => $date])->saveQuietly();
+            }
+
+            TelegramMessageKeywordHit::create(['telegram_message_id' => $message->id, 'keyword_id' => $keyword->id, 'matched_text' => 'match']);
+        }
+
+        $response = $this
+            ->withSession(['site_access_granted' => true])
+            ->get('/telegram?month=2026-08&from_day=2&to_day=5');
+
+        $response
+            ->assertOk()
+            ->assertViewHas('totalMentions', 4)
+            ->assertViewHas('rows', function ($rows): bool {
+                $row = $rows->firstWhere('name', 'Daily Channel');
+
+                return $row['mentions_count'] === 4
+                    && $row['posts_count'] === 4
+                    && $row['posts_has_more'] === true;
+            })
+            ->assertSee('Range Message 5')
+            ->assertSee('Fallback Message 4')
+            ->assertSee('Range Message 3')
+            ->assertDontSee('Range Message 2')
+            ->assertDontSee('Before range')
+            ->assertDontSee('After range');
+
+        $this
+            ->withSession(['site_access_granted' => true])
+            ->getJson('/telegram/'.$channel->id.'/posts?month=2026-08&from_day=2&to_day=5&offset=3')
+            ->assertOk()
+            ->assertJsonPath('total', 4)
+            ->assertJsonPath('has_more', false)
+            ->assertJsonCount(1, 'items')
+            ->assertJsonPath('items.0.title', 'Range Message 2');
+    }
+
+    public function test_invalid_day_range_falls_back_to_the_full_selected_month(): void
+    {
+        Carbon::setTestNow('2026-08-07 12:00:00');
+
+        $site = MonitoredSite::create([
+            'name' => 'Fallback Site',
+            'base_url' => 'https://fallback.example.com',
+            'source_type' => 'html',
+            'enabled' => true,
+        ]);
+        $keyword = Keyword::create(['phrase' => 'match']);
+
+        foreach ([2, 20] as $day) {
+            $article = Article::create([
+                'monitored_site_id' => $site->id,
+                'url' => 'https://fallback.example.com/post-'.$day,
+                'published_at' => '2026-08-'.$day.' 10:00:00',
+            ]);
+            ArticleKeywordHit::create(['article_id' => $article->id, 'keyword_id' => $keyword->id, 'matched_text' => 'match']);
+        }
+
+        $this
+            ->withSession(['site_access_granted' => true])
+            ->get('/sites?month=2026-08&from_day=20&to_day=2')
+            ->assertOk()
+            ->assertViewHas('totalMentions', 2)
+            ->assertViewHas('dayFilterActive', false)
+            ->assertViewHas('selectedFromDay', null)
+            ->assertViewHas('selectedToDay', null)
+            ->assertViewHas('periodQuery', ['month' => '2026-08']);
+    }
+
     public function test_sites_page_shows_paused_status_and_next_check_date(): void
     {
         Carbon::setTestNow('2026-08-17 12:00:00');

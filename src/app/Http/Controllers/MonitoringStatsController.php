@@ -34,66 +34,75 @@ class MonitoringStatsController extends Controller
 
     public function sites(Request $request): View
     {
-        [$months, $selectedMonth, $start, $end] = $this->resolveMonth($request);
-        $rows = $this->siteRows($start, $end);
+        $period = $this->resolvePeriod($request);
+        $rows = $this->siteRows($period['start'], $period['end']);
 
         return view('monitoring.stats', [
             'active' => 'sites',
             'title' => 'Моніторинг сайтів',
-            'description' => 'Унікальні статті зі згадками по кожному сайту за вибраний місяць.',
+            'description' => 'Унікальні статті зі згадками по кожному сайту за вибраний період.',
             'sourceLabel' => 'Сайт',
-            'months' => $months,
-            'selectedMonth' => $selectedMonth,
             'rows' => $rows,
             'totalMentions' => $rows->sum('mentions_count'),
+            ...$period,
         ]);
     }
 
     public function telegram(Request $request): View
     {
-        [$months, $selectedMonth, $start, $end] = $this->resolveMonth($request);
-        $rows = $this->telegramRows($start, $end);
+        $period = $this->resolvePeriod($request);
+        $rows = $this->telegramRows($period['start'], $period['end']);
 
         return view('monitoring.stats', [
             'active' => 'telegram',
             'title' => 'Моніторинг Telegram',
-            'description' => 'Унікальні повідомлення зі згадками по кожному Telegram-каналу за вибраний місяць.',
+            'description' => 'Унікальні повідомлення зі згадками по кожному Telegram-каналу за вибраний період.',
             'sourceLabel' => 'Telegram-канал',
-            'months' => $months,
-            'selectedMonth' => $selectedMonth,
             'rows' => $rows,
             'totalMentions' => $rows->sum('mentions_count'),
+            ...$period,
         ]);
     }
 
     public function sitePosts(Request $request, MonitoredSite $site): JsonResponse
     {
-        [, , $start, $end] = $this->resolveMonth($request);
+        $period = $this->resolvePeriod($request);
 
         return response()->json($this->sitePostsPayload(
             $site,
-            $start,
-            $end,
+            $period['start'],
+            $period['end'],
             max(0, (int) $request->query('offset', 0)),
         ));
     }
 
     public function telegramPosts(Request $request, TelegramChannel $channel): JsonResponse
     {
-        [, , $start, $end] = $this->resolveMonth($request);
+        $period = $this->resolvePeriod($request);
 
         return response()->json($this->telegramPostsPayload(
             $channel,
-            $start,
-            $end,
+            $period['start'],
+            $period['end'],
             max(0, (int) $request->query('offset', 0)),
         ));
     }
 
     /**
-     * @return array{0:list<array{key:string,label:string}>,1:string,2:Carbon,3:Carbon}
+     * @return array{
+     *     months:list<array{key:string,label:string}>,
+     *     selectedMonth:string,
+     *     selectedFromDay:?int,
+     *     selectedToDay:?int,
+     *     daysInMonth:int,
+     *     dayFilterActive:bool,
+     *     periodLabel:string,
+     *     periodQuery:array<string, int|string>,
+     *     start:Carbon,
+     *     end:Carbon
+     * }
      */
-    private function resolveMonth(Request $request): array
+    private function resolvePeriod(Request $request): array
     {
         $months = [];
         $currentMonth = now()->startOfMonth();
@@ -115,8 +124,41 @@ class MonitoringStatsController extends Controller
 
         $start = Carbon::createFromFormat('Y-m-d', $selectedMonth.'-01')->startOfMonth();
         $end = $start->copy()->endOfMonth();
+        $daysInMonth = $start->daysInMonth;
+        $fromDay = filter_var($request->query('from_day'), FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1, 'max_range' => $daysInMonth],
+        ]);
+        $toDay = filter_var($request->query('to_day'), FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1, 'max_range' => $daysInMonth],
+        ]);
+        $dayFilterActive = $fromDay !== false && $toDay !== false && $fromDay <= $toDay;
 
-        return [$months, $selectedMonth, $start, $end];
+        if ($dayFilterActive) {
+            $start = $start->copy()->day((int) $fromDay)->startOfDay();
+            $end = $start->copy()->day((int) $toDay)->endOfDay();
+        }
+
+        $periodQuery = ['month' => $selectedMonth];
+
+        if ($dayFilterActive) {
+            $periodQuery['from_day'] = (int) $fromDay;
+            $periodQuery['to_day'] = (int) $toDay;
+        }
+
+        return [
+            'months' => $months,
+            'selectedMonth' => $selectedMonth,
+            'selectedFromDay' => $dayFilterActive ? (int) $fromDay : null,
+            'selectedToDay' => $dayFilterActive ? (int) $toDay : null,
+            'daysInMonth' => $daysInMonth,
+            'dayFilterActive' => $dayFilterActive,
+            'periodLabel' => $dayFilterActive
+                ? $start->format('d.m.Y').' - '.$end->format('d.m.Y')
+                : 'вибраний місяць',
+            'periodQuery' => $periodQuery,
+            'start' => $start,
+            'end' => $end,
+        ];
     }
 
     /** @return Collection<int, array<string, mixed>> */
