@@ -29,7 +29,7 @@ class SourceHealthSchedulingTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_third_site_failure_pauses_checking_for_24_hours(): void
+    public function test_third_site_failure_pauses_checking_for_4_hours(): void
     {
         Carbon::setTestNow('2026-08-17 12:00:00');
         $site = $this->site(['consecutive_failures' => 2]);
@@ -39,7 +39,7 @@ class SourceHealthSchedulingTest extends TestCase
         $notifier->shouldReceive('sendSourcePaused')
             ->once()
             ->with('site', $site->id, 'Example News', Mockery::on(
-                fn (Carbon $date): bool => $date->equalTo(now()->addHours(24)),
+                fn (Carbon $date): bool => $date->equalTo(now()->addHours(4)),
             ), Mockery::on(fn (string $message): bool => str_contains($message, 'Site unavailable')))
             ->andReturnTrue();
 
@@ -50,10 +50,10 @@ class SourceHealthSchedulingTest extends TestCase
         $this->assertSame(3, $site->consecutive_failures);
         $this->assertSame('temporary', $site->last_error_type);
         $this->assertNotNull($site->paused_at);
-        $this->assertTrue($site->next_check_at->equalTo(now()->addHours(24)));
+        $this->assertTrue($site->next_check_at->equalTo(now()->addHours(4)));
     }
 
-    public function test_first_two_failures_use_15_minute_and_one_hour_backoff(): void
+    public function test_first_two_failures_use_30_minute_and_two_hour_backoff(): void
     {
         Carbon::setTestNow('2026-08-17 12:00:00');
         $site = $this->site();
@@ -64,21 +64,21 @@ class SourceHealthSchedulingTest extends TestCase
         $healthService->recordFailure($site, new RuntimeException('Connection failed'));
         $site->refresh();
         $this->assertSame(1, $site->consecutive_failures);
-        $this->assertTrue($site->next_check_at->equalTo(now()->addMinutes(15)));
+        $this->assertTrue($site->next_check_at->equalTo(now()->addMinutes(30)));
 
-        Carbon::setTestNow('2026-08-17 12:15:00');
+        Carbon::setTestNow('2026-08-17 12:30:00');
         $healthService->recordFailure($site, new RuntimeException('Connection failed'));
         $site->refresh();
         $this->assertSame(2, $site->consecutive_failures);
-        $this->assertTrue($site->next_check_at->equalTo(now()->addHour()));
+        $this->assertTrue($site->next_check_at->equalTo(now()->addHours(2)));
     }
 
-    public function test_permanent_site_error_is_disabled_only_after_24_hour_confirmation(): void
+    public function test_permanent_site_error_is_disabled_on_fourth_failure_after_4_hour_confirmation(): void
     {
         Carbon::setTestNow('2026-08-17 12:00:00');
         $site = $this->site([
             'consecutive_failures' => 3,
-            'last_error_at' => now()->subHours(24),
+            'last_error_at' => now()->subHours(4),
             'last_error' => 'RSS feed returned HTTP 404',
             'last_error_type' => 'permanent',
         ]);
@@ -98,17 +98,17 @@ class SourceHealthSchedulingTest extends TestCase
         $this->assertNotNull($site->disabled_at);
     }
 
-    public function test_temporary_error_keeps_source_enabled_after_daily_retry(): void
+    public function test_fourth_and_later_temporary_errors_retry_every_6_hours(): void
     {
         Carbon::setTestNow('2026-08-17 12:00:00');
         $site = $this->site([
-            'consecutive_failures' => 8,
-            'last_error_at' => now()->subHours(24),
+            'consecutive_failures' => 3,
+            'last_error_at' => now()->subHours(4),
             'last_error_type' => 'temporary',
-            'paused_at' => now()->subHours(24),
+            'paused_at' => now()->subHours(4),
         ]);
         $monitor = Mockery::mock(ArticleMonitorService::class);
-        $monitor->shouldReceive('ingestSite')->once()->andThrow(new RuntimeException('RSS feed returned HTTP 503'));
+        $monitor->shouldReceive('ingestSite')->twice()->andThrow(new RuntimeException('RSS feed returned HTTP 503'));
         $notifier = Mockery::mock(TelegramNotifier::class);
         $notifier->shouldNotReceive('sendSourceDisabled');
         $notifier->shouldNotReceive('sendSourcePaused');
@@ -118,7 +118,15 @@ class SourceHealthSchedulingTest extends TestCase
         $site->refresh();
         $this->assertTrue($site->enabled);
         $this->assertSame('temporary', $site->last_error_type);
-        $this->assertTrue($site->next_check_at->equalTo(now()->addHours(24)));
+        $this->assertSame(4, $site->consecutive_failures);
+        $this->assertTrue($site->next_check_at->equalTo(now()->addHours(6)));
+
+        Carbon::setTestNow('2026-08-17 18:00:00');
+        (new CheckMonitoredSiteJob($site->id))->handle($monitor, new SourceHealthService($notifier));
+
+        $site->refresh();
+        $this->assertSame(5, $site->consecutive_failures);
+        $this->assertTrue($site->next_check_at->equalTo(now()->addHours(6)));
     }
 
     public function test_success_after_pause_restores_normal_site_schedule_and_notifies(): void
@@ -189,7 +197,7 @@ class SourceHealthSchedulingTest extends TestCase
         $this->assertTrue($site->fresh()->check_pending_at->equalTo(now()));
     }
 
-    public function test_third_telegram_failure_pauses_channel_for_24_hours(): void
+    public function test_third_telegram_failure_pauses_channel_for_4_hours(): void
     {
         Carbon::setTestNow('2026-08-17 12:00:00');
         $channel = $this->channel(['consecutive_failures' => 2]);
@@ -207,7 +215,7 @@ class SourceHealthSchedulingTest extends TestCase
         $this->assertTrue($channel->enabled);
         $this->assertSame(3, $channel->consecutive_failures);
         $this->assertNotNull($channel->paused_at);
-        $this->assertTrue($channel->next_check_at->equalTo(now()->addHours(24)));
+        $this->assertTrue($channel->next_check_at->equalTo(now()->addHours(4)));
     }
 
     public function test_systemic_telegram_failure_opens_circuit_without_changing_channel(): void
@@ -228,15 +236,15 @@ class SourceHealthSchedulingTest extends TestCase
         $this->assertTrue(Cache::has(CheckTelegramChannelJob::CIRCUIT_CACHE_KEY));
     }
 
-    public function test_permanent_telegram_error_is_disabled_after_24_hour_confirmation(): void
+    public function test_permanent_telegram_error_is_disabled_on_fourth_failure_after_4_hour_confirmation(): void
     {
         Carbon::setTestNow('2026-08-17 12:00:00');
         $channel = $this->channel([
             'consecutive_failures' => 3,
-            'last_error_at' => now()->subHours(24),
+            'last_error_at' => now()->subHours(4),
             'last_error' => 'USERNAME_NOT_OCCUPIED',
             'last_error_type' => 'permanent',
-            'paused_at' => now()->subHours(24),
+            'paused_at' => now()->subHours(4),
         ]);
         $monitor = Mockery::mock(TelegramChannelMonitorService::class);
         $monitor->shouldReceive('ingestChannel')->once()->andThrow(new RuntimeException('USERNAME_NOT_OCCUPIED'));

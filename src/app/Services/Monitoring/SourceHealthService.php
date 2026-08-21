@@ -18,6 +18,8 @@ class SourceHealthService
 
     private const PAUSE_AFTER_FAILURES = 3;
 
+    private const PERMANENT_FAILURE_CONFIRMATION_HOURS = 4;
+
     private const ERROR_TYPE_TEMPORARY = 'temporary';
 
     private const ERROR_TYPE_PERMANENT = 'permanent';
@@ -110,7 +112,7 @@ class SourceHealthService
                 && $errorType === self::ERROR_TYPE_PERMANENT
                 && $lockedSource->last_error_type === self::ERROR_TYPE_PERMANENT
                 && $lockedSource->last_error_at
-                && $lockedSource->last_error_at->lessThanOrEqualTo($now->copy()->subHours(24));
+                && $lockedSource->last_error_at->lessThanOrEqualTo($now->copy()->subHours(self::PERMANENT_FAILURE_CONFIRMATION_HOURS));
             $updates = [
                 'last_checked_at' => $now,
                 'consecutive_failures' => $failures,
@@ -127,13 +129,17 @@ class SourceHealthService
                     'next_check_at' => null,
                     'paused_at' => null,
                     'disabled_at' => $now,
-                    'disabled_reason' => 'permanent source error confirmed after a 24-hour pause',
+                    'disabled_reason' => sprintf(
+                        'permanent source error confirmed after a %d-hour pause',
+                        self::PERMANENT_FAILURE_CONFIRMATION_HOURS,
+                    ),
                 ];
             } else {
                 $updates['next_check_at'] = match ($failures) {
-                    1 => $now->copy()->addMinutes(15),
-                    2 => $now->copy()->addHour(),
-                    default => $now->copy()->addHours(24),
+                    1 => $now->copy()->addMinutes(30),
+                    2 => $now->copy()->addHours(2),
+                    3 => $now->copy()->addHours(4),
+                    default => $now->copy()->addHours(6),
                 };
 
                 if ($failures >= self::PAUSE_AFTER_FAILURES && $lockedSource->paused_at === null) {
