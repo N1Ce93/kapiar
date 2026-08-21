@@ -6,15 +6,15 @@ use App\Models\MonitoredSite;
 use Carbon\CarbonImmutable;
 use DOMDocument;
 use DOMXPath;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 use Throwable;
 
 class ArticleDiscoveryService
 {
-    public function __construct(private readonly SiteProbeService $probeService)
-    {
-    }
+    public function __construct(private readonly SiteProbeService $probeService) {}
 
     /** @return list<array{url:string,title:?string,excerpt:?string,published_at:?CarbonImmutable}> */
     public function discover(MonitoredSite $site, int $limit = 50): array
@@ -167,7 +167,13 @@ class ArticleDiscoveryService
                 $response = Http::withHeaders(UrlHelper::crawlerHeaders())
                     ->withoutVerifying()
                     ->timeout(20)
-                    ->retry(1, 500)
+                    ->retry(
+                        [1000, 3000],
+                        when: static fn (Throwable $exception): bool => $exception instanceof ConnectionException
+                            || ($exception instanceof RequestException
+                                && in_array($exception->response->status(), [429, 502, 503, 504], true)),
+                        throw: false,
+                    )
                     ->get($url);
             } catch (Throwable $exception) {
                 if ($page === 1) {
