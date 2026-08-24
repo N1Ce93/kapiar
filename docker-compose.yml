@@ -130,6 +130,35 @@ services:
     networks:
       - marketing
 
+  marketing-email-queue:
+    environment:
+      - "DB_HOST=marketing-db"
+      - "REDIS_HOST=marketing-cache"
+      - "TZ=${TZ:-Europe/Kyiv}"
+    restart: unless-stopped
+    stop_grace_period: 17m
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    container_name: "marketing-email-queue"
+    depends_on:
+      marketing-db:
+        condition: service_healthy
+      marketing-cache:
+        condition: service_healthy
+    volumes:
+      - "./src:/app"
+      - "./docker/php/php.ini:/usr/local/etc/php/conf.d/custom.ini"
+    working_dir: "/app"
+    command: "php artisan queue:work --queue=email --timeout=960 --tries=3 --backoff=60 --max-time=3600 --max-jobs=500"
+    healthcheck:
+      test: ["CMD", "php", "artisan", "queue:monitor", "redis:email", "--max=200"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+    networks:
+      - marketing
+
   marketing-scheduler:
     environment:
       - "DB_HOST=marketing-db"

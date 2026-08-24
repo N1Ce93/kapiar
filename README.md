@@ -1,6 +1,6 @@
 # News Monitor
 
-Laravel-приложение мониторит новостные сайты и публичные Telegram-каналы. Найденные статьи и посты сохраняются в базу, проверяются по ключевым словам и при совпадениях отправляются Telegram-уведомления.
+Laravel-приложение мониторит новостные сайты, публичные Telegram-каналы и новые непрочитанные Gmail-письма. Найденные совпадения проверяются по ключевым словам и отправляются в Telegram.
 
 ## Требования
 
@@ -102,6 +102,12 @@ docker compose up -d marketing-telegram-queue
 
 Если Telegram session/MadelineProto нестабилен, оставьте `marketing-telegram-queue` выключенным. Мониторинг сайтов продолжит работать отдельно.
 
+Gmail worker обрабатывает очередь `email`. Запускайте его только после OAuth-настройки и первой инициализации через `gmail:check`:
+
+```bash
+docker compose up -d marketing-email-queue
+```
+
 ## Telegram
 
 Для уведомлений и чтения каналов заполните в `src/.env`:
@@ -132,6 +138,36 @@ docker compose restart marketing-scheduler
 docker compose up -d marketing-telegram-queue
 ```
 
+## Gmail
+
+Gmail проверяется каждую минуту через History API. Обрабатываются только новые непрочитанные письма, включая спам; отправленные письма, черновики и корзина пропускаются. После успешного Telegram-уведомления письмо получает ярлыки совпавших ключей и отмечается прочитанным.
+
+Заполните в `src/.env` OAuth-параметры с правом `gmail.modify`:
+
+```env
+GMAIL_MONITORING_ENABLED=false
+GMAIL_CLIENT_ID=
+GMAIL_CLIENT_SECRET=
+GMAIL_REFRESH_TOKEN=
+```
+
+Проверьте OAuth, инициализируйте checkpoint без обработки старых писем и добавьте первый ключ с интерактивным выбором ярлыка:
+
+```bash
+docker compose run --rm marketing-php php artisan gmail:status
+docker compose run --rm marketing-php php artisan gmail:check
+docker compose run --rm -it marketing-php php artisan email-keywords:add "Оставить свой отзыв"
+```
+
+После этого установите `GMAIL_MONITORING_ENABLED=true`, перезапустите scheduler и запустите worker:
+
+```bash
+docker compose restart marketing-scheduler
+docker compose up -d marketing-email-queue
+```
+
+Успешно обработанные письма в базе не сохраняются. Временная запись содержит только Gmail message ID, совпавшие ключи, целевые ярлыки и этап обработки; она удаляется после изменения письма в Gmail. Подробная настройка: [Как подключить Gmail](doc/add-gmail.md).
+
 ## Release / Deploy Runbook
 
 Перед деплоем остановите новые dispatch-и и мягко перезапустите workers:
@@ -139,7 +175,7 @@ docker compose up -d marketing-telegram-queue
 ```bash
 docker compose stop marketing-scheduler
 docker compose exec marketing-php php artisan queue:restart
-docker compose up -d --build marketing-php marketing-scheduler marketing-sources-queue
+docker compose up -d --build marketing-php marketing-scheduler marketing-sources-queue marketing-email-queue
 ```
 
 Telegram worker включайте отдельно, только если `telegram:status` успешен:
@@ -177,6 +213,7 @@ docker compose ps
 docker compose logs -f marketing-scheduler
 docker compose logs -f marketing-sources-queue
 docker compose logs -f marketing-telegram-queue
+docker compose logs -f marketing-email-queue
 docker compose run --rm marketing-php php artisan sites:probe "https://example.com/"
 docker compose run --rm marketing-php php artisan sites:add "https://example.com/"
 docker compose run --rm marketing-php php artisan parser:check --site="example.com" --limit=5 --no-notify
@@ -186,3 +223,4 @@ docker compose run --rm marketing-php php artisan parser:check --site="example.c
 
 - [Как добавить сайт](doc/add-site.md)
 - [Как добавить Telegram-канал](doc/add-telegram.md)
+- [Как подключить Gmail](doc/add-gmail.md)
