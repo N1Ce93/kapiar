@@ -81,6 +81,14 @@ class TelegramNotifier
             return false;
         }
 
+        if ($response->json('ok') !== true) {
+            Log::warning('Telegram send returned an invalid success response.', [
+                'body' => $this->redact($response->body()),
+            ]);
+
+            return false;
+        }
+
         return true;
     }
 
@@ -99,6 +107,31 @@ class TelegramNotifier
         ));
 
         return $this->sendMessage($text);
+    }
+
+    /**
+     * @param  list<string>  $keywords
+     * @param  list<string>  $labels
+     */
+    public function sendGmailMention(
+        string $account,
+        string $sender,
+        string $subject,
+        ?Carbon $receivedAt,
+        array $keywords,
+        array $labels,
+    ): bool {
+        $date = $receivedAt?->timezone(config('app.timezone'))->format('Y-m-d H:i') ?? '-';
+
+        return $this->sendMessage(trim(sprintf(
+            "Получено письмо по ключевой теме\n\nПочта: %s\nДата: %s\nОтправитель: %s\nТема: %s\nКлючевые слова: %s\nЯрлыки: %s",
+            $account,
+            $date,
+            $sender,
+            $subject,
+            implode(', ', $keywords),
+            implode(', ', $labels),
+        )));
     }
 
     public function sendSourceDisabled(string $type, int $id, string $name, string $reason): bool

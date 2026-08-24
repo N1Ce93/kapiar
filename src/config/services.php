@@ -50,4 +50,11 @@ return [
         'session' => env('TELEGRAM_SESSION', storage_path('app/telegram/client.session')),
     ],
 
+    'gmail' => [
+        'monitoring_enabled' => env('GMAIL_MONITORING_ENABLED', false),
+        'client_id' => env('GMAIL_CLIENT_ID'),
+        'client_secret' => env('GMAIL_CLIENT_SECRET'),
+        'refresh_token' => env('GMAIL_REFRESH_TOKEN'),
+    ],
+
 ];

@@ -47,6 +47,17 @@ class TelegramNotifierTest extends TestCase
             && ! isset($request['reply_to_message_id']));
     }
 
+    public function test_it_rejects_a_telegram_2xx_response_without_ok_true(): void
+    {
+        config([
+            'services.telegram.bot_token' => 'test-token',
+            'services.telegram.chat_id' => '-1000000000000',
+        ]);
+        Http::fake(['api.telegram.org/*' => Http::response(['ok' => false], 200)]);
+
+        $this->assertFalse((new TelegramNotifier)->sendMessage('Test message'));
+    }
+
     public function test_it_formats_telegram_post_date_in_app_timezone(): void
     {
         config([
@@ -83,6 +94,29 @@ class TelegramNotifierTest extends TestCase
         Http::assertSentCount(2);
         Http::assertSent(fn ($request): bool => $request['text'] === "Источник автоматически отключён\n\nТип: site\nID: 42\nИсточник: Example News\nПричина: Connection failed");
         Http::assertSent(fn ($request): bool => $request['text'] === "Источник автоматически отключён\n\nТип: telegram\nID: 17\nИсточник: @test_channel\nПричина: Authorization failed");
+    }
+
+    public function test_it_formats_a_gmail_notification(): void
+    {
+        config([
+            'app.timezone' => 'Europe/Kyiv',
+            'services.telegram.bot_token' => 'test-token',
+            'services.telegram.chat_id' => '-1002354975882',
+        ]);
+        Http::fake(['api.telegram.org/*' => Http::response(['ok' => true])]);
+
+        $this->assertTrue((new TelegramNotifier)->sendGmailMention(
+            account: 'monitor@gmail.com',
+            sender: 'Sender <sender@example.com>',
+            subject: 'Оставить свой отзыв',
+            receivedAt: Carbon::parse('2026-08-24 09:00:00', 'UTC'),
+            keywords: ['Оставить свой отзыв'],
+            labels: ['Відгуки'],
+        ));
+
+        Http::assertSent(fn ($request): bool => str_contains($request['text'], 'Почта: monitor@gmail.com')
+            && str_contains($request['text'], 'Дата: 2026-08-24 12:00')
+            && str_contains($request['text'], 'Ярлыки: Відгуки'));
     }
 
     public function test_it_sends_pause_and_recovery_notifications(): void
