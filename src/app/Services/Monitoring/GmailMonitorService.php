@@ -12,11 +12,12 @@ use Throwable;
 
 class GmailMonitorService
 {
-    private const SKIPPED_LABELS = ['SENT', 'DRAFT', 'TRASH'];
+    private const SKIPPED_LABELS = ['SPAM', 'SENT', 'DRAFT', 'TRASH'];
 
     public function __construct(
         private readonly GmailApiClient $gmail,
         private readonly EmailSubjectMatcher $matcher,
+        private readonly GmailReviewExtractor $reviewExtractor,
         private readonly TelegramNotifier $notifier,
     ) {}
 
@@ -70,7 +71,7 @@ class GmailMonitorService
                 $fallbackSince = $state->initialized_at;
             }
 
-            $messageIds = $this->gmail->unreadMessagesSince($fallbackSince, $heartbeat);
+            $messageIds = $this->gmail->unreadInboxMessagesSince($fallbackSince, $heartbeat);
             $nextHistoryId = $profile['historyId'];
         }
 
@@ -151,7 +152,10 @@ class GmailMonitorService
             $heartbeat?->__invoke();
 
             try {
-                $message = $this->gmail->message($processing->gmail_message_id);
+                $message = $this->gmail->message(
+                    $processing->gmail_message_id,
+                    $processing->telegram_sent_at === null ? 'full' : 'metadata',
+                );
 
                 if ($message === null) {
                     $processing->delete();
@@ -168,15 +172,14 @@ class GmailMonitorService
                         continue;
                     }
 
+                    $review = $this->reviewExtractor->extract($processing->gmail_message_id, $message);
                     $labelIds = $this->ensureLabels($processing->target_labels, $availableLabels, $heartbeat);
 
-                    if (! $this->notifier->sendGmailMention(
-                        account: $state->email_address,
-                        sender: $this->header($message, 'From') ?: 'Неизвестный отправитель',
+                    if (! $this->notifier->sendGmailReview(
                         subject: $this->header($message, 'Subject') ?: 'Без темы',
                         receivedAt: $this->receivedAt($message),
-                        keywords: $processing->matched_keywords,
-                        labels: $processing->target_labels,
+                        review: $review,
+                        gmailUrl: $this->gmailUrl((string) ($message['threadId'] ?? '')),
                     )) {
                         $processing->forceFill([
                             'attempts' => $processing->attempts + 1,
@@ -279,7 +282,8 @@ class GmailMonitorService
     {
         $labels = array_map('strval', $message['labelIds'] ?? []);
 
-        return in_array('UNREAD', $labels, true)
+        return in_array('INBOX', $labels, true)
+            && in_array('UNREAD', $labels, true)
             && array_intersect(self::SKIPPED_LABELS, $labels) === [];
     }
 
@@ -313,5 +317,12 @@ class GmailMonitorService
     private static function normalizeLabelName(string $name): string
     {
         return mb_strtolower(trim($name), 'UTF-8');
+    }
+
+    private function gmailUrl(string $threadId): ?string
+    {
+        return $threadId === ''
+            ? null
+            : 'https://mail.google.com/mail/u/0/?tab=rm&ogbl#all/'.rawurlencode($threadId);
     }
 }

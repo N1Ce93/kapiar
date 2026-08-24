@@ -71,7 +71,7 @@ class GmailApiClient
     }
 
     /** @return list<string> */
-    public function unreadMessagesSince(DateTimeInterface $since, ?Closure $heartbeat = null): array
+    public function unreadInboxMessagesSince(DateTimeInterface $since, ?Closure $heartbeat = null): array
     {
         $messageIds = [];
         $pageToken = null;
@@ -79,8 +79,8 @@ class GmailApiClient
         do {
             $heartbeat?->__invoke();
             $query = [
-                'q' => 'is:unread after:'.$since->getTimestamp(),
-                'includeSpamTrash' => 'true',
+                'q' => 'in:inbox is:unread after:'.$since->getTimestamp(),
+                'includeSpamTrash' => 'false',
                 'maxResults' => 500,
             ];
 
@@ -105,15 +105,29 @@ class GmailApiClient
     }
 
     /** @return array<string,mixed>|null */
-    public function message(string $messageId): ?array
+    public function message(string $messageId, string $format = 'metadata'): ?array
     {
-        $response = $this->request('GET', '/messages/'.rawurlencode($messageId), query: ['format' => 'metadata']);
+        if (! in_array($format, ['metadata', 'full'], true)) {
+            throw new RuntimeException('Unsupported Gmail message format: '.$format);
+        }
+
+        $response = $this->request('GET', '/messages/'.rawurlencode($messageId), query: ['format' => $format]);
 
         if ($response->status() === 404) {
             return null;
         }
 
         return $this->successful($response, 'message get')->json();
+    }
+
+    public function attachmentData(string $messageId, string $attachmentId): string
+    {
+        $response = $this->request(
+            'GET',
+            '/messages/'.rawurlencode($messageId).'/attachments/'.rawurlencode($attachmentId),
+        );
+
+        return (string) $this->successful($response, 'message attachment get')->json('data', '');
     }
 
     /** @return list<array{id:string,name:string,type:string}> */

@@ -40,7 +40,7 @@ class TelegramNotifier
         ));
     }
 
-    public function sendMessage(string $message): bool
+    public function sendMessage(string $message, ?string $parseMode = null, bool $disableWebPagePreview = false): bool
     {
         $token = config('services.telegram.bot_token');
         $chatId = config('services.telegram.chat_id');
@@ -53,9 +53,13 @@ class TelegramNotifier
 
         $payload = [
             'chat_id' => $chatId,
-            'text' => mb_substr($message, 0, 4000, 'UTF-8'),
-            'disable_web_page_preview' => false,
+            'text' => $parseMode === null ? mb_substr($message, 0, 4000, 'UTF-8') : $message,
+            'disable_web_page_preview' => $disableWebPagePreview,
         ];
+
+        if ($parseMode !== null) {
+            $payload['parse_mode'] = $parseMode;
+        }
 
         $replyToChatId = config('services.telegram.reply_to_chat_id');
         $replyToMessageId = config('services.telegram.reply_to_message_id');
@@ -109,29 +113,37 @@ class TelegramNotifier
         return $this->sendMessage($text);
     }
 
-    /**
-     * @param  list<string>  $keywords
-     * @param  list<string>  $labels
-     */
-    public function sendGmailMention(
-        string $account,
-        string $sender,
+    public function sendGmailReview(
         string $subject,
         ?Carbon $receivedAt,
-        array $keywords,
-        array $labels,
+        string $review,
+        ?string $gmailUrl,
     ): bool {
         $date = $receivedAt?->timezone(config('app.timezone'))->format('Y-m-d H:i') ?? '-';
+        $subject = trim($subject);
 
-        return $this->sendMessage(trim(sprintf(
-            "Получено письмо по ключевой теме\n\nПочта: %s\nДата: %s\nОтправитель: %s\nТема: %s\nКлючевые слова: %s\nЯрлыки: %s",
-            $account,
-            $date,
-            $sender,
-            $subject,
-            implode(', ', $keywords),
-            implode(', ', $labels),
-        )));
+        if (mb_strlen($subject, 'UTF-8') > 500) {
+            $subject = mb_substr($subject, 0, 497, 'UTF-8').'...';
+        }
+
+        $review = trim($review) !== '' ? trim($review) : 'Отзыв отсутствует';
+        $truncated = "\n\n[текст сокращён]";
+
+        if (mb_strlen($review, 'UTF-8') > 3000) {
+            $review = mb_substr($review, 0, 3000 - mb_strlen($truncated, 'UTF-8'), 'UTF-8').$truncated;
+        }
+
+        $link = $gmailUrl === null
+            ? ''
+            : sprintf("\n<b>Письмо:</b> <a href=\"%s\">Открыть в Gmail</a>", $this->escapeHtml($gmailUrl));
+
+        return $this->sendMessage(sprintf(
+            "<b>Новый отзыв</b>\n\n<b>Дата:</b> %s\n<b>Тема:</b> %s%s\n\n<b>Отзыв:</b>\n<blockquote expandable>%s</blockquote>",
+            $this->escapeHtml($date),
+            $this->escapeHtml($subject),
+            $link,
+            $this->escapeHtml($review),
+        ), 'HTML', true);
     }
 
     public function sendSourceDisabled(string $type, int $id, string $name, string $reason): bool
@@ -177,5 +189,10 @@ class TelegramNotifier
         }
 
         return preg_replace('~bot\d+:[A-Za-z0-9_-]+~', 'bot[redacted]', $text) ?? $text;
+    }
+
+    private function escapeHtml(string $text): string
+    {
+        return htmlspecialchars($text, ENT_COMPAT | ENT_SUBSTITUTE | ENT_HTML401, 'UTF-8');
     }
 }

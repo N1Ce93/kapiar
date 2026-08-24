@@ -61,7 +61,7 @@ class GmailMonitorServiceTest extends TestCase
         Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), 'api.telegram.org'));
     }
 
-    public function test_it_processes_unread_spam_applies_all_keyword_labels_and_keeps_no_history(): void
+    public function test_it_processes_an_unread_inbox_review_applies_all_keyword_labels_and_keeps_no_history(): void
     {
         $state = $this->state();
         EmailSubjectKeyword::create(['phrase' => 'Оставить свой отзыв', 'label_name' => 'Відгуки']);
@@ -73,7 +73,7 @@ class GmailMonitorServiceTest extends TestCase
                 'historyId' => '101',
                 'history' => [['messagesAdded' => [['message' => ['id' => 'message-1']]]]],
             ],
-            'message' => $this->gmailMessage('message-1', ['UNREAD', 'SPAM']),
+            'message' => $this->gmailMessage('message-1', ['INBOX', 'UNREAD']),
             'labels' => ['labels' => [['id' => 'Label_1', 'name' => 'Відгуки', 'type' => 'user']]],
             'created_label' => ['id' => 'Label_2', 'name' => 'Скарги'],
         ]));
@@ -90,22 +90,31 @@ class GmailMonitorServiceTest extends TestCase
         $this->assertDatabaseCount('gmail_processing_messages', 0);
 
         Http::assertSent(fn (Request $request): bool => str_contains($request->url(), 'api.telegram.org')
-            && str_contains((string) $request['text'], 'Оставить свой отзыв, Новая жалоба')
-            && str_contains((string) $request['text'], 'Відгуки, Скарги'));
+            && $request['parse_mode'] === 'HTML'
+            && $request['disable_web_page_preview'] === true
+            && str_contains((string) $request['text'], '<b>Новый отзыв</b>')
+            && str_contains((string) $request['text'], '<blockquote expandable>Очень хороший врач &lt;спасибо&gt;</blockquote>')
+            && str_contains((string) $request['text'], 'https://mail.google.com/mail/u/0/?tab=rm&amp;ogbl#all/thread-message-1')
+            && ! str_contains((string) $request['text'], 'monitor@gmail.com')
+            && ! str_contains((string) $request['text'], 'Відгуки'));
+        Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/messages/message-1?')
+            && str_contains($request->url(), 'format=full'));
         Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/messages/message-1/modify')
             && $request['addLabelIds'] === ['Label_1', 'Label_2']
             && $request['removeLabelIds'] === ['UNREAD']);
     }
 
-    public function test_it_skips_read_sent_draft_and_trash_messages_but_advances_the_checkpoint(): void
+    public function test_it_skips_read_archived_spam_sent_draft_and_trash_messages_but_advances_the_checkpoint(): void
     {
         $state = $this->state();
         EmailSubjectKeyword::create(['phrase' => 'Оставить свой отзыв', 'label_name' => 'Відгуки']);
         $messages = [
             'read-message' => $this->gmailMessage('read-message', ['INBOX']),
-            'sent-message' => $this->gmailMessage('sent-message', ['UNREAD', 'SENT']),
-            'draft-message' => $this->gmailMessage('draft-message', ['UNREAD', 'DRAFT']),
-            'trash-message' => $this->gmailMessage('trash-message', ['UNREAD', 'TRASH']),
+            'archived-message' => $this->gmailMessage('archived-message', ['UNREAD']),
+            'spam-message' => $this->gmailMessage('spam-message', ['INBOX', 'UNREAD', 'SPAM']),
+            'sent-message' => $this->gmailMessage('sent-message', ['INBOX', 'UNREAD', 'SENT']),
+            'draft-message' => $this->gmailMessage('draft-message', ['INBOX', 'UNREAD', 'DRAFT']),
+            'trash-message' => $this->gmailMessage('trash-message', ['INBOX', 'UNREAD', 'TRASH']),
         ];
 
         Http::fake(fn (Request $request) => $this->responseFor($request, [
@@ -122,7 +131,7 @@ class GmailMonitorServiceTest extends TestCase
 
         $stats = app(GmailMonitorService::class)->check();
 
-        $this->assertSame(4, $stats['found']);
+        $this->assertSame(6, $stats['found']);
         $this->assertSame(0, $stats['matched']);
         $this->assertSame('104', $state->fresh()->history_id);
         $this->assertDatabaseCount('gmail_processing_messages', 0);
@@ -143,7 +152,7 @@ class GmailMonitorServiceTest extends TestCase
         Http::fake(fn (Request $request) => $this->responseFor($request, [
             'profile' => ['emailAddress' => 'monitor@gmail.com', 'historyId' => '101'],
             'history' => ['historyId' => '101'],
-            'message' => $this->gmailMessage('message-1', ['UNREAD', 'SPAM']),
+            'message' => $this->gmailMessage('message-1', ['INBOX', 'UNREAD']),
             'labels' => ['labels' => [['id' => 'Label_1', 'name' => 'Відгуки', 'type' => 'user']]],
         ]));
 
@@ -176,8 +185,8 @@ class GmailMonitorServiceTest extends TestCase
             'profile' => ['emailAddress' => 'monitor@gmail.com', 'historyId' => '101'],
             'history' => ['historyId' => '101'],
             'messages' => [
-                'message-invalid' => $this->gmailMessage('message-invalid', ['UNREAD', 'SPAM']),
-                'message-valid' => $this->gmailMessage('message-valid', ['UNREAD', 'SPAM']),
+                'message-invalid' => $this->gmailMessage('message-invalid', ['INBOX', 'UNREAD']),
+                'message-valid' => $this->gmailMessage('message-valid', ['INBOX', 'UNREAD']),
             ],
             'labels' => ['labels' => [
                 ['id' => 'SPAM', 'name' => 'SPAM', 'type' => 'system'],
@@ -207,7 +216,7 @@ class GmailMonitorServiceTest extends TestCase
                 'history' => $historyCalls === 0
                     ? ['historyId' => '101', 'history' => [['messagesAdded' => [['message' => ['id' => 'message-1']]]]]]
                     : ['historyId' => '101'],
-                'message' => $this->gmailMessage('message-1', ['UNREAD', 'SPAM']),
+                'message' => $this->gmailMessage('message-1', ['INBOX', 'UNREAD']),
                 'labels' => ['labels' => [['id' => 'Label_1', 'name' => 'Відгуки', 'type' => 'user']]],
                 'modify_status' => $modifyCalls === 0 ? 500 : 200,
             ];
@@ -244,7 +253,7 @@ class GmailMonitorServiceTest extends TestCase
         $this->assertDatabaseCount('gmail_processing_messages', 0);
     }
 
-    public function test_it_recovers_an_expired_history_checkpoint_using_unread_mail_including_spam(): void
+    public function test_it_recovers_an_expired_history_checkpoint_using_unread_inbox_mail_without_spam(): void
     {
         $state = $this->state();
         $state->forceFill([
@@ -263,8 +272,8 @@ class GmailMonitorServiceTest extends TestCase
         $this->assertTrue($stats['recovered']);
         $this->assertSame('200', $state->fresh()->history_id);
         Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/messages?')
-            && str_contains(urldecode($request->url()), 'q=is:unread after:'.$state->initialized_at->getTimestamp())
-            && str_contains($request->url(), 'includeSpamTrash=true'));
+            && str_contains(urldecode($request->url()), 'q=in:inbox is:unread after:'.$state->initialized_at->getTimestamp())
+            && str_contains($request->url(), 'includeSpamTrash=false'));
     }
 
     public function test_it_rejects_a_different_oauth_account_after_initialization(): void
@@ -292,14 +301,21 @@ class GmailMonitorServiceTest extends TestCase
     /** @return array<string,mixed> */
     private function gmailMessage(string $id, array $labels): array
     {
+        $body = "Вступление\nТекст сообщения:\nОчень хороший врач <спасибо>\n--\nПодпись";
+
         return [
             'id' => $id,
+            'threadId' => 'thread-'.$id,
             'labelIds' => $labels,
             'internalDate' => '1787562000000',
-            'payload' => ['headers' => [
-                ['name' => 'From', 'value' => 'Sender <sender@example.com>'],
-                ['name' => 'Subject', 'value' => 'ЗОКБ: ОСТАВИТЬ СВОЙ ОТЗЫВ / новая жалоба'],
-            ]],
+            'payload' => [
+                'mimeType' => 'text/plain',
+                'headers' => [
+                    ['name' => 'From', 'value' => 'Sender <sender@example.com>'],
+                    ['name' => 'Subject', 'value' => 'ЗОКБ: ОСТАВИТЬ СВОЙ ОТЗЫВ / новая жалоба'],
+                ],
+                'body' => ['data' => rtrim(strtr(base64_encode($body), '+/', '-_'), '=')],
+            ],
         ];
     }
 

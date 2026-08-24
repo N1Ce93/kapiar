@@ -105,18 +105,34 @@ class TelegramNotifierTest extends TestCase
         ]);
         Http::fake(['api.telegram.org/*' => Http::response(['ok' => true])]);
 
-        $this->assertTrue((new TelegramNotifier)->sendGmailMention(
-            account: 'monitor@gmail.com',
-            sender: 'Sender <sender@example.com>',
-            subject: 'Оставить свой отзыв',
+        $this->assertTrue((new TelegramNotifier)->sendGmailReview(
+            subject: 'Оставить <свой> отзыв',
             receivedAt: Carbon::parse('2026-08-24 09:00:00', 'UTC'),
-            keywords: ['Оставить свой отзыв'],
-            labels: ['Відгуки'],
+            review: 'Хорошо & быстро',
+            gmailUrl: 'https://mail.google.com/mail/u/0/?tab=rm&ogbl#all/thread-1',
         ));
 
-        Http::assertSent(fn ($request): bool => str_contains($request['text'], 'Почта: monitor@gmail.com')
-            && str_contains($request['text'], 'Дата: 2026-08-24 12:00')
-            && str_contains($request['text'], 'Ярлыки: Відгуки'));
+        Http::assertSent(fn ($request): bool => $request['text'] === "<b>Новый отзыв</b>\n\n<b>Дата:</b> 2026-08-24 12:00\n<b>Тема:</b> Оставить &lt;свой&gt; отзыв\n<b>Письмо:</b> <a href=\"https://mail.google.com/mail/u/0/?tab=rm&amp;ogbl#all/thread-1\">Открыть в Gmail</a>\n\n<b>Отзыв:</b>\n<blockquote expandable>Хорошо &amp; быстро</blockquote>"
+            && $request['parse_mode'] === 'HTML'
+            && $request['disable_web_page_preview'] === true);
+    }
+
+    public function test_it_replaces_an_empty_gmail_review_and_truncates_a_long_one(): void
+    {
+        config([
+            'services.telegram.bot_token' => 'test-token',
+            'services.telegram.chat_id' => '-1002354975882',
+        ]);
+        Http::fake(['api.telegram.org/*' => Http::response(['ok' => true])]);
+        $notifier = new TelegramNotifier;
+
+        $this->assertTrue($notifier->sendGmailReview('Тема', null, '', null));
+        $this->assertTrue($notifier->sendGmailReview('Тема', null, str_repeat('я', 3100), null));
+
+        Http::assertSentCount(2);
+        Http::assertSent(fn ($request): bool => str_contains($request['text'], '<blockquote expandable>Отзыв отсутствует</blockquote>'));
+        Http::assertSent(fn ($request): bool => str_contains($request['text'], '[текст сокращён]</blockquote>')
+            && mb_strlen(html_entity_decode(strip_tags($request['text'])), 'UTF-8') < 4096);
     }
 
     public function test_it_sends_pause_and_recovery_notifications(): void
