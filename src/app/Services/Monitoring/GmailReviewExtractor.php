@@ -2,12 +2,17 @@
 
 namespace App\Services\Monitoring;
 
+use Symfony\Component\Mime\Address;
+
 class GmailReviewExtractor
 {
     public function __construct(private readonly GmailApiClient $gmail) {}
 
-    /** @param array<string,mixed> $message */
-    public function extract(string $messageId, array $message): string
+    /**
+     * @param  array<string,mixed>  $message
+     * @return array{review:string,senderName:string,senderEmail:string}
+     */
+    public function extract(string $messageId, array $message): array
     {
         $parts = ['plain' => [], 'html' => []];
         $this->collectTextParts($messageId, $message['payload'] ?? [], $parts);
@@ -18,21 +23,43 @@ class GmailReviewExtractor
         $text = $this->normalize($text);
 
         if ($text === '') {
-            return '';
+            return ['review' => '', 'senderName' => '', 'senderEmail' => ''];
         }
 
-        if (! preg_match('~(?:^|\n)[ \t]*Текст[ \t]+сообщения:[ \t]*(?:\n|$)~iu', $text, $start, PREG_OFFSET_CAPTURE)) {
-            return $text;
+        $hasStartMarker = preg_match('~(?:^|\n)[ \t]*Текст[ \t]+сообщения:[ \t]*(?:\n|$)~iu', $text, $start, PREG_OFFSET_CAPTURE) === 1;
+        $sender = $this->sender($hasStartMarker ? substr($text, 0, $start[0][1]) : $text);
+
+        if (! $hasStartMarker) {
+            return ['review' => $text, ...$sender];
         }
 
         $startOffset = $start[0][1] + strlen($start[0][0]);
         $afterMarker = substr($text, $startOffset);
 
         if (! preg_match('~(?:^|\n)[ \t]*--[ \t]*(?:\n|$)~u', $afterMarker, $end, PREG_OFFSET_CAPTURE)) {
-            return $text;
+            return ['review' => $text, ...$sender];
         }
 
-        return $this->normalize(substr($afterMarker, 0, $end[0][1]));
+        return ['review' => $this->normalize(substr($afterMarker, 0, $end[0][1])), ...$sender];
+    }
+
+    /** @return array{senderName:string,senderEmail:string} */
+    private function sender(string $preamble): array
+    {
+        if (! preg_match('~(?:^|\n)[ \t]*От:[ \t]*(.+?)[ \t]*(?:\n|$)~iu', $preamble, $match)) {
+            return ['senderName' => '', 'senderEmail' => ''];
+        }
+
+        try {
+            $address = Address::create(trim($match[1]));
+        } catch (\InvalidArgumentException) {
+            return ['senderName' => '', 'senderEmail' => ''];
+        }
+
+        return [
+            'senderName' => $address->getName(),
+            'senderEmail' => $address->getAddress(),
+        ];
     }
 
     /**

@@ -99,7 +99,24 @@ docker compose run --rm marketing-php php artisan sites:add "https://example.com
 --listing-url="https://example.com/news"
 ```
 
-Если HTML-страница содержит ссылки на разделы, пагинацию или другие страницы, которые ошибочно определяются как статьи, задайте регулярное выражение для пути URL:
+## 8. Настроить Отбор URL И Текст Статьи
+
+Парсер обрабатывает сайт в два отдельных этапа:
+
+```text
+listing_url → article_url_pattern → URL статьи → content_selector → проверка ключевых слов
+```
+
+| Поле | Формат | Когда применяется | Назначение |
+|---|---|---|---|
+| `article_url_pattern` | PCRE regex | На странице списка новостей, до сохранения статьи | Отбирает только правильные URL статей |
+| `content_selector` | CSS selector | После открытия страницы статьи | Выделяет основной текст без меню, рекомендаций и других посторонних блоков |
+
+`article_url_pattern` не выбирает текст статьи, а `content_selector` не фильтрует найденные ссылки.
+
+### Настроить article_url_pattern
+
+Если страница списка содержит ссылки на разделы, пагинацию или другие страницы, которые ошибочно определяются как статьи, задайте регулярное выражение для пути URL:
 
 ```bash
 docker compose run --rm marketing-php php artisan sites:add "https://ria-m.tv/ua/" \
@@ -110,7 +127,11 @@ docker compose run --rm marketing-php php artisan sites:add "https://ria-m.tv/ua
   --no-backfill
 ```
 
-Шаблон проверяется только против пути URL, например `/ua/news/412842/article.html`. Если шаблон не задан, используется стандартное автоматическое определение статей. Ссылки на другие домены и статические файлы отбрасываются независимо от шаблона.
+Шаблон проверяется только против пути URL, например `/ua/news/412842/article.html`. Домен и query-параметры в проверке не участвуют.
+
+Если шаблон не задан, используется стандартное автоматическое определение статей. Если шаблон задан, он заменяет стандартное определение. Ссылки на другие домены и статические файлы отбрасываются независимо от шаблона.
+
+Используйте якоря `^` и `$`, чтобы выражение проверяло весь путь. В shell заключайте regex в одинарные кавычки, чтобы специальные символы не обрабатывались оболочкой.
 
 Установить или заменить шаблон существующего сайта:
 
@@ -124,7 +145,88 @@ docker compose run --rm marketing-php php artisan sites:set-article-url-pattern 
 docker compose run --rm marketing-php php artisan sites:set-article-url-pattern 42 --clear
 ```
 
-## 8. Собрать Старые Статьи
+Невалидный или слишком длинный regex команда сохранить не позволит. Если значение было повреждено прямым изменением базы, проверка сайта завершится явной ошибкой конфигурации.
+
+### Настроить content_selector
+
+`content_selector` задаёт CSS-контейнер с основным текстом на странице статьи. Он помогает исключить связанные новости, комментарии, боковые панели и другие блоки, которые могут создавать ложные совпадения ключевых слов.
+
+Например, для такой разметки:
+
+```html
+<div class="post">
+    <div class="content">Основной текст статьи</div>
+</div>
+<section class="related">Другие новости</section>
+```
+
+нужно задать:
+
+```bash
+docker compose run --rm marketing-php php artisan sites:set-content-selector 42 '.post > .content'
+```
+
+Команда принимает ID, название, домен или base URL сайта:
+
+```bash
+docker compose run --rm marketing-php php artisan sites:set-content-selector "example.com" 'main .article-body'
+```
+
+Удалить настройку и вернуть стандартное извлечение:
+
+```bash
+docker compose run --rm marketing-php php artisan sites:set-content-selector 42 --clear
+```
+
+Подходящие примеры CSS-селекторов:
+
+```css
+article
+.post-content
+.post > .content
+main .article-body
+```
+
+Парсер использует первый элемент, найденный по selector. Если `content_selector` не задан, некорректен или не найден, приложение пишет предупреждение в лог и последовательно пробует `<article>`, `<main>` и `<body>`.
+
+Перед выбором selector откройте страницу обычной статьи в DevTools и найдите стабильный контейнер с основным текстом. Не используйте сгенерированные классы, которые меняются при каждой сборке сайта.
+
+Поле работает как для HTML-, так и для RSS-источников: RSS отвечает за обнаружение URL, после чего страница статьи всё равно загружается для анализа текста.
+
+### Настроить поля через seeder
+
+Обе настройки можно хранить рядом с конфигурацией сайта в `MonitoredSitesSeeder`:
+
+```php
+[
+    'name' => 'Example News',
+    'url' => 'https://example.com/',
+    'source_type' => 'html',
+    'listing_url' => 'https://example.com/news/',
+    'article_url_pattern' => '~^/news/[0-9]+/[^/]+\.html$~u',
+    'content_selector' => 'main .article-body',
+],
+```
+
+Для RSS-источника `article_url_pattern` не применяется и очищается при переключении источника на RSS. `content_selector` при этом сохраняет смысл и продолжает управлять извлечением текста статьи.
+
+### Проверить настройки
+
+Проверить обнаружение ссылок без сохранения статей и уведомлений:
+
+```bash
+docker compose run --rm marketing-php php artisan sites:audit --site=42 --limit=20
+```
+
+Выполнить полный анализ одного сайта без Telegram-уведомлений:
+
+```bash
+docker compose run --rm marketing-php php artisan parser:check --site=42 --limit=20 --no-notify
+```
+
+После проверки убедитесь, что в `articles.url` нет ссылок на категории и пагинацию, а в логах отсутствуют предупреждения `Configured article content selector did not match`.
+
+## 9. Собрать Старые Статьи
 
 Backfill нужен, чтобы старые статьи попали в базу и не отправились в Telegram как новые.
 
@@ -152,7 +254,7 @@ docker compose run --rm marketing-php php artisan parser:backfill --site="zabor.
 docker compose run --rm marketing-php php artisan parser:backfill --limit=500 --analyze
 ```
 
-## 9. Проверить Новые Статьи
+## 10. Проверить Новые Статьи
 
 Ручной запуск проверки новых статей напрямую, без очереди:
 
@@ -200,7 +302,7 @@ docker compose run --rm marketing-php php artisan sources:dispatch-checks --site
 
 Каждый сайт обрабатывается отдельной job. Повторная job для того же сайта не добавляется, пока предыдущая еще находится в очереди или выполняется.
 
-## 10. Обновить Источники Сайтов
+## 11. Обновить Источники Сайтов
 
 Если сайт был добавлен как HTML, но позже появилась RSS-лента, можно заново определить источник:
 
@@ -214,7 +316,7 @@ docker compose run --rm marketing-php php artisan sites:refresh-sources --site="
 docker compose run --rm marketing-php php artisan sites:refresh-sources --dry-run
 ```
 
-## 11. Автоматическая Проверка
+## 12. Автоматическая Проверка
 
 В `src/routes/console.php` настроен поиск готовых к проверке сайтов каждые 10 минут:
 
@@ -256,7 +358,7 @@ docker compose ps marketing-scheduler
 docker compose logs -f marketing-scheduler
 ```
 
-## 12. Включить Отключённый Сайт
+## 13. Включить Отключённый Сайт
 
 Включить сайт по ID:
 
@@ -272,7 +374,7 @@ docker compose run --rm marketing-php php artisan sites:enable "https://example.
 
 Команда сбрасывает ошибки и паузу, назначая проверку на ближайший запуск scheduler. Этой же командой можно досрочно возобновить уже включённый, но приостановленный сайт.
 
-## 13. Удалить Сайт
+## 14. Удалить Сайт
 
 Удалить сайт по ID вместе со всеми собранными статьями и совпадениями ключевых слов:
 
@@ -288,6 +390,7 @@ docker compose run --rm marketing-php php artisan sites:delete 42
 docker compose run --rm marketing-php php artisan sites:probe "https://example.com/"
 docker compose run --rm marketing-php php artisan sites:add "https://example.com/"
 docker compose run --rm marketing-php php artisan sites:set-article-url-pattern 42 '~^/news/[0-9]+/[^/]+\.html$~u'
+docker compose run --rm marketing-php php artisan sites:set-content-selector 42 'main .article-body'
 docker compose run --rm marketing-php php artisan sites:delete 42
 docker compose run --rm marketing-php php artisan sites:enable 42
 docker compose run --rm marketing-php php artisan sites:refresh-sources --site="example.com"

@@ -137,7 +137,8 @@ class TelegramNotifierTest extends TestCase
         $this->assertTrue($notifier->sendGmailReview('Тема', null, '', '', str_repeat('я', 3100), null));
 
         Http::assertSentCount(2);
-        Http::assertSent(fn ($request): bool => str_contains($request['text'], "<b>Отправитель:</b> -\n<b>Email:</b> -")
+        Http::assertSent(fn ($request): bool => ! str_contains($request['text'], '<b>Отправитель:</b>')
+            && ! str_contains($request['text'], '<b>Email:</b>')
             && str_contains($request['text'], '<blockquote expandable>Отзыв отсутствует</blockquote>'));
         Http::assertSent(fn ($request): bool => str_contains($request['text'], '[текст сокращён]</blockquote>')
             && mb_strlen(html_entity_decode(strip_tags($request['text'])), 'UTF-8') < 4096);

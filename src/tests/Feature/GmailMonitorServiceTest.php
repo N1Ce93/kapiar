@@ -95,10 +95,11 @@ class GmailMonitorServiceTest extends TestCase
             && $request['disable_web_page_preview'] === true
             && $request['message_thread_id'] === 9123
             && str_contains((string) $request['text'], '<b>Новый отзыв</b>')
-            && str_contains((string) $request['text'], "<b>Отправитель:</b> Иван Иванов\n<b>Email:</b> sender@example.com")
+            && str_contains((string) $request['text'], "<b>Отправитель:</b> Лемешко Андрій Андрійович\n<b>Email:</b> petya1155@gmail.com")
             && str_contains((string) $request['text'], '<blockquote expandable>Очень хороший врач &lt;спасибо&gt;</blockquote>')
             && str_contains((string) $request['text'], 'https://mail.google.com/mail/u/0/?tab=rm&amp;ogbl#all/thread-message-1')
             && ! str_contains((string) $request['text'], 'monitor@gmail.com')
+            && ! str_contains((string) $request['text'], 'no-reply@example.com')
             && ! str_contains((string) $request['text'], 'Відгуки'));
         Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/messages/message-1?')
             && str_contains($request->url(), 'format=full'));
@@ -304,7 +305,7 @@ class GmailMonitorServiceTest extends TestCase
     /** @return array<string,mixed> */
     private function gmailMessage(string $id, array $labels): array
     {
-        $body = "Вступление\nТекст сообщения:\nОчень хороший врач <спасибо>\n--\nПодпись";
+        $body = "От: Лемешко Андрій Андрійович <petya1155@gmail.com>\nТелефон: +380990893483\n\nТекст сообщения:\nОчень хороший врач <спасибо>\n--\nПодпись";
 
         return [
             'id' => $id,
@@ -314,7 +315,7 @@ class GmailMonitorServiceTest extends TestCase
             'payload' => [
                 'mimeType' => 'text/plain',
                 'headers' => [
-                    ['name' => 'From', 'value' => '=?UTF-8?B?0JjQstCw0L0g0JjQstCw0L3QvtCy?= <sender@example.com>'],
+                    ['name' => 'From', 'value' => 'Website Robot <no-reply@example.com>'],
                     ['name' => 'Subject', 'value' => 'ЗОКБ: ОСТАВИТЬ СВОЙ ОТЗЫВ / новая жалоба'],
                 ],
                 'body' => ['data' => rtrim(strtr(base64_encode($body), '+/', '-_'), '=')],

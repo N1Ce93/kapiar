@@ -27,33 +27,61 @@ class GmailReviewExtractorTest extends TestCase
     {
         $body = "Заголовок\r\nТЕКСТ   СООБЩЕНИЯ:\r\n  Первая   строка  \r\n\r\n\r\nВторая строка\r\n -- \r\nПодпись";
 
-        $review = (new GmailReviewExtractor(new GmailApiClient))->extract('message-1', [
+        $extracted = (new GmailReviewExtractor(new GmailApiClient))->extract('message-1', [
             'payload' => $this->textPart('text/plain', $body),
         ]);
 
-        $this->assertSame("Первая строка\n\nВторая строка", $review);
+        $this->assertSame("Первая строка\n\nВторая строка", $extracted['review']);
+        $this->assertSame('', $extracted['senderName']);
+        $this->assertSame('', $extracted['senderEmail']);
     }
 
     public function test_it_uses_the_whole_body_when_both_markers_are_not_present(): void
     {
         $body = "Вводная строка\nТекст сообщения:\nОтзыв без завершающего маркера";
 
-        $review = (new GmailReviewExtractor(new GmailApiClient))->extract('message-1', [
+        $extracted = (new GmailReviewExtractor(new GmailApiClient))->extract('message-1', [
             'payload' => $this->textPart('text/plain', $body),
         ]);
 
-        $this->assertSame($body, $review);
+        $this->assertSame($body, $extracted['review']);
     }
 
     public function test_it_uses_html_when_plain_text_is_absent(): void
     {
         $html = '<html><style>.hidden { display: none; }</style><body><p>Текст сообщения:</p><div>Очень &lt;хорошо&gt;<br>Спасибо</div><p>--</p><p>Подпись</p></body></html>';
 
-        $review = (new GmailReviewExtractor(new GmailApiClient))->extract('message-1', [
+        $extracted = (new GmailReviewExtractor(new GmailApiClient))->extract('message-1', [
             'payload' => $this->textPart('text/html', $html),
         ]);
 
-        $this->assertSame("Очень <хорошо>\nСпасибо", $review);
+        $this->assertSame("Очень <хорошо>\nСпасибо", $extracted['review']);
+    }
+
+    public function test_it_extracts_the_sender_from_the_body_preamble(): void
+    {
+        $body = "От: Лемешко Андрій Андрійович <petya1155@gmail.com>\nТелефон: +380990893483\n\nТекст сообщения:\nВсім миру та добра!\n--\nПодпись";
+
+        $extracted = (new GmailReviewExtractor(new GmailApiClient))->extract('message-1', [
+            'payload' => $this->textPart('text/plain', $body),
+        ]);
+
+        $this->assertSame('Лемешко Андрій Андрійович', $extracted['senderName']);
+        $this->assertSame('petya1155@gmail.com', $extracted['senderEmail']);
+        $this->assertSame('Всім миру та добра!', $extracted['review']);
+    }
+
+    public function test_it_ignores_an_invalid_sender_and_sender_lines_inside_the_review(): void
+    {
+        $body = "От: Некорректный адрес <not-an-email>\nТекст сообщения:\nОт: Другой Пользователь <other@example.com>\nОтзыв\n--";
+
+        $extracted = (new GmailReviewExtractor(new GmailApiClient))->extract('message-1', [
+            'payload' => $this->textPart('text/plain', $body),
+        ]);
+
+        $this->assertSame('', $extracted['senderName']);
+        $this->assertSame('', $extracted['senderEmail']);
+        $this->assertSame("От: Другой Пользователь <other@example.com>\nОтзыв", $extracted['review']);
     }
 
     public function test_it_loads_inline_text_from_an_attachment_id_but_ignores_file_attachments(): void
@@ -70,7 +98,7 @@ class GmailReviewExtractorTest extends TestCase
             return Http::response(['unexpected' => $request->url()], 500);
         });
 
-        $review = (new GmailReviewExtractor(new GmailApiClient))->extract('message-1', [
+        $extracted = (new GmailReviewExtractor(new GmailApiClient))->extract('message-1', [
             'payload' => [
                 'mimeType' => 'multipart/mixed',
                 'parts' => [
@@ -88,7 +116,7 @@ class GmailReviewExtractorTest extends TestCase
             ],
         ]);
 
-        $this->assertSame('Отзыв из большой части', $review);
+        $this->assertSame('Отзыв из большой части', $extracted['review']);
         Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), '/attachments/file-part'));
     }
 
