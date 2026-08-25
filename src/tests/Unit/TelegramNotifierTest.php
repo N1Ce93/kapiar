@@ -111,11 +111,13 @@ class TelegramNotifierTest extends TestCase
         $this->assertTrue((new TelegramNotifier)->sendGmailReview(
             subject: 'Оставить <свой> отзыв',
             receivedAt: Carbon::parse('2026-08-24 09:00:00', 'UTC'),
+            senderName: 'Иван <Иванов>',
+            senderEmail: 'ivan@example.com',
             review: 'Хорошо & быстро',
             gmailUrl: 'https://mail.google.com/mail/u/0/?tab=rm&ogbl#all/thread-1',
         ));
 
-        Http::assertSent(fn ($request): bool => $request['text'] === "<b>Новый отзыв</b>\n\n<b>Дата:</b> 2026-08-24 12:00\n<b>Тема:</b> Оставить &lt;свой&gt; отзыв\n<b>Письмо:</b> <a href=\"https://mail.google.com/mail/u/0/?tab=rm&amp;ogbl#all/thread-1\">Открыть в Gmail</a>\n\n<b>Отзыв:</b>\n<blockquote expandable>Хорошо &amp; быстро</blockquote>"
+        Http::assertSent(fn ($request): bool => $request['text'] === "<b>Новый отзыв</b>\n\n<b>Дата:</b> 2026-08-24 12:00\n<b>Тема:</b> Оставить &lt;свой&gt; отзыв\n<b>Отправитель:</b> Иван &lt;Иванов&gt;\n<b>Email:</b> ivan@example.com\n<b>Письмо:</b> <a href=\"https://mail.google.com/mail/u/0/?tab=rm&amp;ogbl#all/thread-1\">Открыть в Gmail</a>\n\n<b>Отзыв:</b>\n<blockquote expandable>Хорошо &amp; быстро</blockquote>"
             && $request['parse_mode'] === 'HTML'
             && $request['disable_web_page_preview'] === true
             && $request['message_thread_id'] === 9123
@@ -131,11 +133,12 @@ class TelegramNotifierTest extends TestCase
         Http::fake(['api.telegram.org/*' => Http::response(['ok' => true])]);
         $notifier = new TelegramNotifier;
 
-        $this->assertTrue($notifier->sendGmailReview('Тема', null, '', null));
-        $this->assertTrue($notifier->sendGmailReview('Тема', null, str_repeat('я', 3100), null));
+        $this->assertTrue($notifier->sendGmailReview('Тема', null, '', '', '', null));
+        $this->assertTrue($notifier->sendGmailReview('Тема', null, '', '', str_repeat('я', 3100), null));
 
         Http::assertSentCount(2);
-        Http::assertSent(fn ($request): bool => str_contains($request['text'], '<blockquote expandable>Отзыв отсутствует</blockquote>'));
+        Http::assertSent(fn ($request): bool => str_contains($request['text'], "<b>Отправитель:</b> -\n<b>Email:</b> -")
+            && str_contains($request['text'], '<blockquote expandable>Отзыв отсутствует</blockquote>'));
         Http::assertSent(fn ($request): bool => str_contains($request['text'], '[текст сокращён]</blockquote>')
             && mb_strlen(html_entity_decode(strip_tags($request['text'])), 'UTF-8') < 4096);
     }

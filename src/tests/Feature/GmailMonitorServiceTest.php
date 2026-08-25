@@ -95,6 +95,7 @@ class GmailMonitorServiceTest extends TestCase
             && $request['disable_web_page_preview'] === true
             && $request['message_thread_id'] === 9123
             && str_contains((string) $request['text'], '<b>Новый отзыв</b>')
+            && str_contains((string) $request['text'], "<b>Отправитель:</b> Иван Иванов\n<b>Email:</b> sender@example.com")
             && str_contains((string) $request['text'], '<blockquote expandable>Очень хороший врач &lt;спасибо&gt;</blockquote>')
             && str_contains((string) $request['text'], 'https://mail.google.com/mail/u/0/?tab=rm&amp;ogbl#all/thread-message-1')
             && ! str_contains((string) $request['text'], 'monitor@gmail.com')
@@ -313,7 +314,7 @@ class GmailMonitorServiceTest extends TestCase
             'payload' => [
                 'mimeType' => 'text/plain',
                 'headers' => [
-                    ['name' => 'From', 'value' => 'Sender <sender@example.com>'],
+                    ['name' => 'From', 'value' => '=?UTF-8?B?0JjQstCw0L0g0JjQstCw0L3QvtCy?= <sender@example.com>'],
                     ['name' => 'Subject', 'value' => 'ЗОКБ: ОСТАВИТЬ СВОЙ ОТЗЫВ / новая жалоба'],
                 ],
                 'body' => ['data' => rtrim(strtr(base64_encode($body), '+/', '-_'), '=')],

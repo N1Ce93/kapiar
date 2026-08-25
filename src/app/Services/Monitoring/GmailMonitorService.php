@@ -8,6 +8,7 @@ use App\Models\GmailProcessingMessage;
 use Closure;
 use Illuminate\Support\Carbon;
 use RuntimeException;
+use Symfony\Component\Mime\Address;
 use Throwable;
 
 class GmailMonitorService
@@ -174,10 +175,13 @@ class GmailMonitorService
 
                     $review = $this->reviewExtractor->extract($processing->gmail_message_id, $message);
                     $labelIds = $this->ensureLabels($processing->target_labels, $availableLabels, $heartbeat);
+                    $sender = $this->sender($message);
 
                     if (! $this->notifier->sendGmailReview(
                         subject: $this->header($message, 'Subject') ?: 'Без темы',
                         receivedAt: $this->receivedAt($message),
+                        senderName: $sender['name'],
+                        senderEmail: $sender['email'],
                         review: $review,
                         gmailUrl: $this->gmailUrl((string) ($message['threadId'] ?? '')),
                     )) {
@@ -304,6 +308,30 @@ class GmailMonitorService
         }
 
         return '';
+    }
+
+    /**
+     * @param  array<string,mixed>  $message
+     * @return array{name:string,email:string}
+     */
+    private function sender(array $message): array
+    {
+        $from = $this->header($message, 'From');
+
+        if ($from === '') {
+            return ['name' => '', 'email' => ''];
+        }
+
+        try {
+            $address = Address::create($from);
+        } catch (\InvalidArgumentException) {
+            return ['name' => '', 'email' => ''];
+        }
+
+        return [
+            'name' => $address->getName(),
+            'email' => $address->getAddress(),
+        ];
     }
 
     /** @param array<string,mixed> $message */

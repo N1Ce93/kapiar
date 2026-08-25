@@ -124,11 +124,15 @@ class TelegramNotifier
     public function sendGmailReview(
         string $subject,
         ?Carbon $receivedAt,
+        string $senderName,
+        string $senderEmail,
         string $review,
         ?string $gmailUrl,
     ): bool {
         $date = $receivedAt?->timezone(config('app.timezone'))->format('Y-m-d H:i') ?? '-';
         $subject = trim($subject);
+        $senderName = trim($senderName) ?: '-';
+        $senderEmail = trim($senderEmail) ?: '-';
 
         if (mb_strlen($subject, 'UTF-8') > 500) {
             $subject = mb_substr($subject, 0, 497, 'UTF-8').'...';
@@ -147,9 +151,11 @@ class TelegramNotifier
             : sprintf("\n<b>Письмо:</b> <a href=\"%s\">Открыть в Gmail</a>", $this->escapeHtml($gmailUrl));
 
         return $this->sendMessage(sprintf(
-            "<b>Новый отзыв</b>\n\n<b>Дата:</b> %s\n<b>Тема:</b> %s%s\n\n<b>Отзыв:</b>\n<blockquote expandable>%s</blockquote>",
+            "<b>Новый отзыв</b>\n\n<b>Дата:</b> %s\n<b>Тема:</b> %s\n<b>Отправитель:</b> %s\n<b>Email:</b> %s%s\n\n<b>Отзыв:</b>\n<blockquote expandable>%s</blockquote>",
             $this->escapeHtml($date),
             $this->escapeHtml($subject),
+            $this->escapeHtml($senderName),
+            $this->escapeHtml($senderEmail),
             $link,
             $this->escapeHtml($review),
         ), 'HTML', true, is_numeric($threadId) ? (int) $threadId : null);
