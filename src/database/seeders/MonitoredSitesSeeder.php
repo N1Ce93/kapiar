@@ -114,7 +114,14 @@ class MonitoredSitesSeeder extends Seeder
             ],
             ['name' => 'News Blog', 'url' => 'https://news.blog.net.ua/'],
             ['name' => 'МВ', 'url' => 'https://mv.org.ua/'],
-            ['name' => 'РИА Мелитополь', 'url' => 'https://ria-m.tv/'],
+            [
+                'name' => 'РИА Мелитополь',
+                'url' => 'https://ria-m.tv/ua/',
+                'previous_urls' => ['https://ria-m.tv/'],
+                'source_type' => 'html',
+                'listing_url' => 'https://ria-m.tv/ua/news/',
+                'article_url_pattern' => '~^/ua/news/[0-9]+/[^/]+\.html$~u',
+            ],
             [
                 'name' => 'Бердянськ 24',
                 'url' => 'https://www.brd24.com/',
@@ -176,6 +183,15 @@ class MonitoredSitesSeeder extends Seeder
         foreach ($sites as $site) {
             $baseUrl = UrlHelper::normalizeBaseUrl($site['url']);
             $existing = MonitoredSite::query()->where('base_url', $baseUrl)->first();
+
+            if (! $existing && isset($site['previous_urls'])) {
+                $previousBaseUrls = array_map(
+                    static fn (string $url): string => UrlHelper::normalizeBaseUrl($url),
+                    $site['previous_urls'],
+                );
+                $existing = MonitoredSite::query()->whereIn('base_url', $previousBaseUrls)->orderBy('id')->first();
+            }
+
             $probe = (! isset($site['source_type']) && $probeService) ? $probeService->probe($baseUrl) : null;
             $detectedSource = $probe['source_type'] ?? null;
             $sourceType = $site['source_type']
@@ -186,15 +202,18 @@ class MonitoredSitesSeeder extends Seeder
                 ?? 'html';
             $feedUrl = $site['feed_url'] ?? ($sourceType === 'rss' ? ($probe['feed_url'] ?? $existing?->feed_url) : null);
             $listingUrl = $site['listing_url'] ?? ($sourceType === 'html' ? ($probe['listing_url'] ?? $existing?->listing_url ?? $baseUrl) : null);
+            $articleUrlPattern = $site['article_url_pattern'] ?? ($sourceType === 'html' ? $existing?->article_url_pattern : null);
 
             MonitoredSite::updateOrCreate(
-                ['base_url' => $baseUrl],
+                $existing ? ['id' => $existing->id] : ['base_url' => $baseUrl],
                 [
                     'name' => $site['name'],
+                    'base_url' => $baseUrl,
                     'source_type' => $sourceType,
                     'feed_url' => $sourceType === 'rss' ? $feedUrl : null,
                     'listing_url' => $sourceType === 'html' ? ($listingUrl ?: $baseUrl) : null,
                     'content_selector' => $site['content_selector'] ?? $existing?->content_selector,
+                    'article_url_pattern' => $sourceType === 'html' ? $articleUrlPattern : null,
                     'enabled' => $site['enabled'] ?? true,
                 ],
             );

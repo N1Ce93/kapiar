@@ -5,6 +5,7 @@ namespace App\Services\Monitoring;
 use DOMDocument;
 use DOMXPath;
 use Illuminate\Support\Facades\Http;
+use RuntimeException;
 use Throwable;
 
 class SiteProbeService
@@ -72,7 +73,7 @@ class SiteProbeService
     }
 
     /** @return list<string> */
-    public function extractArticleLinks(string $html, string $baseUrl): array
+    public function extractArticleLinks(string $html, string $baseUrl, ?string $articleUrlPattern = null): array
     {
         $dom = $this->loadHtml($html);
         $xpath = new DOMXPath($dom);
@@ -81,7 +82,7 @@ class SiteProbeService
         foreach ($xpath->query('//a[@href]') as $node) {
             $url = UrlHelper::absoluteUrl($node->getAttribute('href'), $baseUrl);
 
-            if ($url === null || ! UrlHelper::sameHost($url, $baseUrl) || ! $this->looksLikeArticleUrl($url, $baseUrl)) {
+            if ($url === null || ! $this->isArticleUrl($url, $baseUrl, $articleUrlPattern)) {
                 continue;
             }
 
@@ -91,24 +92,48 @@ class SiteProbeService
         return array_values(array_unique($links));
     }
 
-    private function looksLikeArticleUrl(string $url, string $baseUrl): bool
+    public function isValidArticleUrlPattern(string $pattern): bool
     {
-        $path = trim(parse_url($url, PHP_URL_PATH) ?: '', '/');
+        return $pattern !== '' && mb_strlen($pattern) <= 1000 && @preg_match($pattern, '/') !== false;
+    }
+
+    public function isArticleUrl(string $url, string $baseUrl, ?string $articleUrlPattern = null): bool
+    {
+        if (! UrlHelper::sameHost($url, $baseUrl)) {
+            return false;
+        }
+
+        $path = parse_url($url, PHP_URL_PATH) ?: '';
+        $trimmedPath = trim($path, '/');
         $basePath = trim(parse_url($baseUrl, PHP_URL_PATH) ?: '', '/');
 
-        if ($path === '' || $path === $basePath) {
+        if ($trimmedPath === '') {
             return false;
         }
 
-        if (preg_match('~\.(jpg|jpeg|png|gif|svg|webp|css|js|pdf|zip)$~i', $path)) {
+        if (preg_match('~\.(jpg|jpeg|png|gif|svg|webp|css|js|pdf|zip)$~i', $trimmedPath)) {
             return false;
         }
 
-        if (preg_match('~^(category|tag|author|page|wp-content|wp-json|feed|comments|search|login|register|firms|afisha)(/|$)~i', $path)) {
+        if ($articleUrlPattern !== null) {
+            $matches = @preg_match($articleUrlPattern, $path);
+
+            if ($matches === false) {
+                throw new RuntimeException('Invalid article URL pattern: '.preg_last_error_msg());
+            }
+
+            return $matches === 1;
+        }
+
+        if ($trimmedPath === $basePath) {
             return false;
         }
 
-        return str_contains($path, '/') || preg_match('~\d{4}|new/|news/view~i', $path) === 1;
+        if (preg_match('~^(category|tag|author|page|wp-content|wp-json|feed|comments|search|login|register|firms|afisha)(/|$)~i', $trimmedPath)) {
+            return false;
+        }
+
+        return str_contains($trimmedPath, '/') || preg_match('~\d{4}|new/|news/view~i', $trimmedPath) === 1;
     }
 
     private function isValidFeed(string $url): bool

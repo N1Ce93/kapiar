@@ -156,6 +156,10 @@ class ArticleDiscoveryService
     /** @return list<array{url:string,title:?string,excerpt:?string,published_at:?CarbonImmutable}> */
     private function discoverFromHtmlSite(MonitoredSite $site, int $limit): array
     {
+        if ($site->article_url_pattern !== null && ! $this->probeService->isValidArticleUrlPattern($site->article_url_pattern)) {
+            throw new RuntimeException('Invalid article URL pattern configured for site '.$site->id.': '.$site->name);
+        }
+
         $listingUrl = $site->listing_url ?: $site->base_url;
         $items = [];
         $pages = max(1, min(20, (int) ceil($limit / 25)));
@@ -191,7 +195,7 @@ class ArticleDiscoveryService
                 break;
             }
 
-            $items = array_merge($items, $this->extractArticlesFromHtml($response->body(), $url));
+            $items = array_merge($items, $this->extractArticlesFromHtml($response->body(), $url, $site->article_url_pattern));
             $items = $this->uniqueByUrl($items);
         }
 
@@ -199,7 +203,7 @@ class ArticleDiscoveryService
     }
 
     /** @return list<array{url:string,title:?string,excerpt:?string,published_at:?CarbonImmutable}> */
-    private function extractArticlesFromHtml(string $html, string $baseUrl): array
+    private function extractArticlesFromHtml(string $html, string $baseUrl, ?string $articleUrlPattern): array
     {
         $dom = new DOMDocument('1.0', 'UTF-8');
         $previous = libxml_use_internal_errors(true);
@@ -213,7 +217,9 @@ class ArticleDiscoveryService
         foreach ($xpath->query('//*[contains(concat(" ", normalize-space(@class), " "), " article-item ")]//a[contains(concat(" ", normalize-space(@class), " "), " article-title ")][@href]') as $node) {
             $url = UrlHelper::absoluteUrl($node->getAttribute('href'), $baseUrl);
 
-            if ($url === null || ! UrlHelper::sameHost($url, $baseUrl)) {
+            if ($url === null
+                || ! UrlHelper::sameHost($url, $baseUrl)
+                || ($articleUrlPattern !== null && ! $this->probeService->isArticleUrl($url, $baseUrl, $articleUrlPattern))) {
                 continue;
             }
 
@@ -229,7 +235,7 @@ class ArticleDiscoveryService
             return $this->uniqueByUrl($items);
         }
 
-        $articleLinks = $this->probeService->extractArticleLinks($html, $baseUrl);
+        $articleLinks = $this->probeService->extractArticleLinks($html, $baseUrl, $articleUrlPattern);
 
         foreach ($xpath->query('//a[@href]') as $node) {
             $url = UrlHelper::absoluteUrl($node->getAttribute('href'), $baseUrl);

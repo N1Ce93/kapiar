@@ -17,6 +17,7 @@ use Throwable;
     {--source= : Force source type: rss or html}
     {--feed-url= : RSS feed URL when forcing or overriding RSS}
     {--listing-url= : HTML listing URL when forcing or overriding HTML}
+    {--article-url-pattern= : Regex matched against the article URL path}
     {--backfill-limit=500 : Number of old articles to save immediately}
     {--no-backfill : Add the site without collecting old articles}')]
 #[Description('Add a monitored site, auto-detect RSS/HTML, and backfill old articles without Telegram')]
@@ -25,9 +26,24 @@ class SitesAddCommand extends Command
     public function handle(SiteProbeService $probeService, ArticleMonitorService $monitorService): int
     {
         $forcedSource = $this->option('source') ? strtolower((string) $this->option('source')) : null;
+        $articleUrlPattern = $this->option('article-url-pattern') !== null
+            ? trim((string) $this->option('article-url-pattern'))
+            : null;
 
         if ($forcedSource !== null && ! in_array($forcedSource, ['rss', 'html'], true)) {
             $this->error('Invalid source. Use rss or html.');
+
+            return self::FAILURE;
+        }
+
+        if ($articleUrlPattern !== null && ! $probeService->isValidArticleUrlPattern($articleUrlPattern)) {
+            $this->error('Invalid article URL pattern. Pass a valid regex up to 1000 characters.');
+
+            return self::FAILURE;
+        }
+
+        if ($forcedSource === 'rss' && $articleUrlPattern !== null) {
+            $this->error('Article URL patterns can only be used with HTML sources.');
 
             return self::FAILURE;
         }
@@ -36,6 +52,12 @@ class SitesAddCommand extends Command
         $sourceType = $forcedSource ?: $probe['source_type'];
         $feedUrl = $this->option('feed-url') ?: $probe['feed_url'];
         $listingUrl = $this->option('listing-url') ?: $probe['listing_url'];
+
+        if ($sourceType === 'rss' && $articleUrlPattern !== null) {
+            $this->error('Article URL patterns can only be used with HTML sources.');
+
+            return self::FAILURE;
+        }
 
         if ($sourceType === 'rss' && ! $feedUrl) {
             $this->error('RSS source was selected, but no valid RSS feed was detected. Pass --feed-url=.');
@@ -53,21 +75,30 @@ class SitesAddCommand extends Command
             return self::FAILURE;
         }
 
+        $attributes = [
+            'name' => $this->option('name') ?: $probe['name'],
+            'source_type' => $sourceType,
+            'feed_url' => $sourceType === 'rss' ? UrlHelper::cleanUrl((string) $feedUrl) : null,
+            'listing_url' => $sourceType === 'html' ? UrlHelper::cleanUrl((string) $listingUrl) : null,
+            'enabled' => true,
+        ];
+
+        if ($sourceType === 'rss') {
+            $attributes['article_url_pattern'] = null;
+        } elseif ($articleUrlPattern !== null) {
+            $attributes['article_url_pattern'] = $articleUrlPattern;
+        }
+
         $site = MonitoredSite::updateOrCreate(
             ['base_url' => $probe['base_url']],
-            [
-                'name' => $this->option('name') ?: $probe['name'],
-                'source_type' => $sourceType,
-                'feed_url' => $sourceType === 'rss' ? UrlHelper::cleanUrl((string) $feedUrl) : null,
-                'listing_url' => $sourceType === 'html' ? UrlHelper::cleanUrl((string) $listingUrl) : null,
-                'enabled' => true,
-            ],
+            $attributes,
         );
 
         $this->info(($site->wasRecentlyCreated ? 'Site added: ' : 'Site updated: ').$site->name);
         $this->line('Source: '.$site->source_type);
         $this->line('Feed URL: '.($site->feed_url ?: '-'));
         $this->line('Listing URL: '.($site->listing_url ?: '-'));
+        $this->line('Article URL pattern: '.($site->article_url_pattern ?: '-'));
 
         if ($this->option('no-backfill')) {
             return self::SUCCESS;

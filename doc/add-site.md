@@ -99,6 +99,31 @@ docker compose run --rm marketing-php php artisan sites:add "https://example.com
 --listing-url="https://example.com/news"
 ```
 
+Если HTML-страница содержит ссылки на разделы, пагинацию или другие страницы, которые ошибочно определяются как статьи, задайте регулярное выражение для пути URL:
+
+```bash
+docker compose run --rm marketing-php php artisan sites:add "https://ria-m.tv/ua/" \
+  --name="РИА Мелитополь" \
+  --source=html \
+  --listing-url="https://ria-m.tv/ua/news/" \
+  --article-url-pattern='~^/ua/news/[0-9]+/[^/]+\.html$~u' \
+  --no-backfill
+```
+
+Шаблон проверяется только против пути URL, например `/ua/news/412842/article.html`. Если шаблон не задан, используется стандартное автоматическое определение статей. Ссылки на другие домены и статические файлы отбрасываются независимо от шаблона.
+
+Установить или заменить шаблон существующего сайта:
+
+```bash
+docker compose run --rm marketing-php php artisan sites:set-article-url-pattern 42 '~^/news/[0-9]+/[^/]+\.html$~u'
+```
+
+Вернуть стандартное автоматическое определение:
+
+```bash
+docker compose run --rm marketing-php php artisan sites:set-article-url-pattern 42 --clear
+```
+
 ## 8. Собрать Старые Статьи
 
 Backfill нужен, чтобы старые статьи попали в базу и не отправились в Telegram как новые.
@@ -247,11 +272,23 @@ docker compose run --rm marketing-php php artisan sites:enable "https://example.
 
 Команда сбрасывает ошибки и паузу, назначая проверку на ближайший запуск scheduler. Этой же командой можно досрочно возобновить уже включённый, но приостановленный сайт.
 
+## 13. Удалить Сайт
+
+Удалить сайт по ID вместе со всеми собранными статьями и совпадениями ключевых слов:
+
+```bash
+docker compose run --rm marketing-php php artisan sites:delete 42
+```
+
+Команда показывает количество статей и запрашивает подтверждение. Для запуска без подтверждения используйте `--force`. Общие ключевые слова не удаляются.
+
 ## Список Команд
 
 ```bash
 docker compose run --rm marketing-php php artisan sites:probe "https://example.com/"
 docker compose run --rm marketing-php php artisan sites:add "https://example.com/"
+docker compose run --rm marketing-php php artisan sites:set-article-url-pattern 42 '~^/news/[0-9]+/[^/]+\.html$~u'
+docker compose run --rm marketing-php php artisan sites:delete 42
 docker compose run --rm marketing-php php artisan sites:enable 42
 docker compose run --rm marketing-php php artisan sites:refresh-sources --site="example.com"
 docker compose run --rm marketing-php php artisan parser:backfill --limit=500

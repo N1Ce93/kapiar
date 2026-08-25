@@ -35,8 +35,9 @@ class SitesRefreshSourcesCommand extends Command
 
             $this->table(['Field', 'Current', 'Detected'], [
                 ['Source', $site->source_type, $updates['source_type'] ?? $site->source_type],
-                ['RSS URL', $site->feed_url ?: '-', $updates['feed_url'] ?? ($site->feed_url ?: '-')],
-                ['HTML listing URL', $site->listing_url ?: '-', $updates['listing_url'] ?? ($site->listing_url ?: '-')],
+                ['RSS URL', $site->feed_url ?: '-', $this->displayedUpdate($updates, 'feed_url', $site->feed_url)],
+                ['HTML listing URL', $site->listing_url ?: '-', $this->displayedUpdate($updates, 'listing_url', $site->listing_url)],
+                ['Article URL pattern', $site->article_url_pattern ?: '-', $this->displayedUpdate($updates, 'article_url_pattern', $site->article_url_pattern)],
                 ['HTML article links', '-', (string) $probe['html_article_count']],
             ]);
 
@@ -106,6 +107,7 @@ class SitesRefreshSourcesCommand extends Command
                 'source_type' => 'rss',
                 'feed_url' => UrlHelper::cleanUrl($probe['feed_url']),
                 'listing_url' => null,
+                'article_url_pattern' => null,
             ];
         } elseif ($detectedSource === 'html') {
             $currentListingUrl = $site->listing_url ? UrlHelper::cleanUrl($site->listing_url) : null;
@@ -126,5 +128,10 @@ class SitesRefreshSourcesCommand extends Command
             fn (mixed $value, string $key): bool => $site->{$key} !== $value,
             ARRAY_FILTER_USE_BOTH,
         );
+    }
+
+    private function displayedUpdate(array $updates, string $key, ?string $current): string
+    {
+        return array_key_exists($key, $updates) ? ($updates[$key] ?: '-') : ($current ?: '-');
     }
 }

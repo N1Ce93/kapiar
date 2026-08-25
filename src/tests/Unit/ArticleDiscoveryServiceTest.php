@@ -68,6 +68,77 @@ class ArticleDiscoveryServiceTest extends TestCase
         Sleep::assertNeverSlept();
     }
 
+    public function test_ria_discovery_only_returns_ukrainian_article_urls(): void
+    {
+        Http::fake(['*' => Http::response(<<<'HTML'
+            <html><body>
+                <a href="/ua/politika">Політика</a>
+                <a href="/ua/region">Запоріжжя</a>
+                <a href="/ua/news/page/2">Наступна сторінка</a>
+                <a href="/news/412842/russian-article.html">Русская новость</a>
+                <a href="/ua/news/412842/ukrainian-article.html"><img src="article.jpg"></a>
+                <a href="/ua/news/412842/ukrainian-article.html">Українська новина</a>
+            </body></html>
+            HTML, 200)]);
+
+        $items = $this->service()->discover($this->riaSite(), 25);
+
+        $this->assertCount(1, $items);
+        $this->assertSame('https://ria-m.tv/ua/news/412842/ukrainian-article.html', $items[0]['url']);
+        $this->assertSame('Українська новина', $items[0]['title']);
+    }
+
+    public function test_ria_rules_also_apply_to_optimized_article_markup(): void
+    {
+        Http::fake(['*' => Http::response(<<<'HTML'
+            <html><body>
+                <div class="article-item">
+                    <a class="article-title" href="/ua/politika">Політика</a>
+                </div>
+                <div class="article-item">
+                    <a class="article-title" href="/ua/news/412842/ukrainian-article.html">Українська новина</a>
+                </div>
+            </body></html>
+            HTML, 200)]);
+
+        $items = $this->service()->discover($this->riaSite(), 25);
+
+        $this->assertCount(1, $items);
+        $this->assertSame('https://ria-m.tv/ua/news/412842/ukrainian-article.html', $items[0]['url']);
+    }
+
+    public function test_optimized_markup_keeps_previous_behavior_without_a_pattern(): void
+    {
+        Http::fake(['*' => Http::response(<<<'HTML'
+            <html><body>
+                <div class="article-item">
+                    <a class="article-title" href="/story">Story</a>
+                </div>
+            </body></html>
+            HTML, 200)]);
+
+        $items = $this->service()->discover($this->site(), 25);
+
+        $this->assertCount(1, $items);
+        $this->assertSame('https://example.com/story', $items[0]['url']);
+    }
+
+    public function test_invalid_stored_pattern_fails_before_requesting_the_listing(): void
+    {
+        Http::fake();
+        $site = $this->site();
+        $site->article_url_pattern = '[';
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Invalid article URL pattern configured for site');
+
+        try {
+            $this->service()->discover($site, 25);
+        } finally {
+            Http::assertNothingSent();
+        }
+    }
+
     private function service(): ArticleDiscoveryService
     {
         return new ArticleDiscoveryService(new SiteProbeService);
@@ -80,6 +151,18 @@ class ArticleDiscoveryServiceTest extends TestCase
             'base_url' => 'https://example.com/',
             'source_type' => 'html',
             'listing_url' => 'https://example.com/news',
+            'enabled' => true,
+        ]);
+    }
+
+    private function riaSite(): MonitoredSite
+    {
+        return new MonitoredSite([
+            'name' => 'РИА Мелитополь',
+            'base_url' => 'https://ria-m.tv/ua/',
+            'source_type' => 'html',
+            'listing_url' => 'https://ria-m.tv/ua/news/',
+            'article_url_pattern' => '~^/ua/news/[0-9]+/[^/]+\.html$~u',
             'enabled' => true,
         ]);
     }
