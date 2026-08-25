@@ -13,6 +13,7 @@ class MonitoredSite extends Model
         'source_type',
         'feed_url',
         'listing_url',
+        'content_selector',
         'enabled',
         'consecutive_failures',
         'last_checked_at',

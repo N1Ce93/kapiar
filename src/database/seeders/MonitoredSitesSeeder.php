@@ -124,7 +124,7 @@ class MonitoredSitesSeeder extends Seeder
             ['name' => 'Справжнє', 'url' => 'https://spravzhne.media/'],
             ['name' => 'Sky Запоріжжя', 'url' => 'https://sky.zp.ua/'],
             ['name' => 'Infolight', 'url' => 'https://infolight.ua/'],
-            ['name' => 'MedInfo', 'url' => 'https://medinfo.zp.ua/'],
+            ['name' => 'MedInfo', 'url' => 'https://medinfo.zp.ua/', 'content_selector' => '.post > .content'],
             ['name' => 'Відбудова Запоріжжя', 'url' => 'https://vidbudova.zp.ua/'],
             ['name' => 'Вместе', 'url' => 'https://vmestezp.org/'],
             ['name' => '24 Запоріжжя', 'url' => 'https://24.zp.ua/'],
@@ -194,6 +194,7 @@ class MonitoredSitesSeeder extends Seeder
                     'source_type' => $sourceType,
                     'feed_url' => $sourceType === 'rss' ? $feedUrl : null,
                     'listing_url' => $sourceType === 'html' ? ($listingUrl ?: $baseUrl) : null,
+                    'content_selector' => $site['content_selector'] ?? $existing?->content_selector,
                     'enabled' => $site['enabled'] ?? true,
                 ],
             );

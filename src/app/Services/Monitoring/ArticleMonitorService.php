@@ -15,8 +15,7 @@ class ArticleMonitorService
         private readonly ArticleTextExtractor $textExtractor,
         private readonly KeywordMatcher $keywordMatcher,
         private readonly TelegramNotifier $telegramNotifier,
-    ) {
-    }
+    ) {}
 
     /** @return array{found:int,created:int,skipped:int,analyzed:int,hits:int,sent:int} */
     public function ingestSite(MonitoredSite $site, int $limit, bool $backfill, bool $analyze, bool $notify): array
@@ -41,7 +40,7 @@ class ArticleMonitorService
                 $stats['skipped']++;
 
                 if ($backfill && $analyze && $article->checked_at === null) {
-                    $processStats = $this->processArticle($article, notify: false);
+                    $processStats = $this->processArticle($article, notify: false, contentSelector: $site->content_selector);
                     $stats['analyzed']++;
                     $stats['hits'] += $processStats['hits'];
                 }
@@ -52,7 +51,7 @@ class ArticleMonitorService
             $stats['created']++;
 
             if ($analyze) {
-                $processStats = $this->processArticle($article, $notify);
+                $processStats = $this->processArticle($article, $notify, $site->content_selector);
                 $stats['analyzed']++;
                 $stats['hits'] += $processStats['hits'];
                 $stats['sent'] += $processStats['sent'];
@@ -65,9 +64,9 @@ class ArticleMonitorService
     }
 
     /** @return array{hits:int,sent:int} */
-    public function processArticle(Article $article, bool $notify): array
+    public function processArticle(Article $article, bool $notify, ?string $contentSelector = null): array
     {
-        $extracted = $this->textExtractor->extract($article->url);
+        $extracted = $this->textExtractor->extract($article->url, $contentSelector);
 
         if ($extracted === null) {
             $article->forceFill(['checked_at' => now()])->save();
