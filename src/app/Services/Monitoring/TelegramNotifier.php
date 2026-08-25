@@ -157,28 +157,6 @@ class TelegramNotifier
         )));
     }
 
-    public function sendSourcePaused(string $type, int $id, string $name, Carbon $nextCheckAt, string $reason): bool
-    {
-        return $this->sendMessage(trim(sprintf(
-            "Проверка источника приостановлена\n\nТип: %s\nID: %d\nИсточник: %s\nСледующая проверка: %s\nПричина: %s",
-            $type,
-            $id,
-            $name,
-            $nextCheckAt->timezone(config('app.timezone'))->format('Y-m-d H:i'),
-            mb_substr($this->redact($reason), 0, 1000, 'UTF-8'),
-        )));
-    }
-
-    public function sendSourceRecovered(string $type, int $id, string $name): bool
-    {
-        return $this->sendMessage(trim(sprintf(
-            "Проверка источника восстановлена\n\nТип: %s\nID: %d\nИсточник: %s",
-            $type,
-            $id,
-            $name,
-        )));
-    }
-
     private function redact(string $text): string
     {
         $token = (string) config('services.telegram.bot_token');

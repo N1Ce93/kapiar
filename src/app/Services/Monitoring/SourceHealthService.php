@@ -64,14 +64,13 @@ class SourceHealthService
 
     public function recordSuccess(MonitoredSite|TelegramChannel $source, ?string $claimToken = null): void
     {
-        $recovered = DB::transaction(function () use ($source, $claimToken): ?array {
+        DB::transaction(function () use ($source, $claimToken): void {
             $lockedSource = $this->lockSource($source);
 
             if (! $lockedSource?->enabled || ! $this->ownsClaim($lockedSource, $claimToken)) {
-                return null;
+                return;
             }
 
-            $wasPaused = $lockedSource->paused_at !== null;
             $lockedSource->forceFill([
                 'consecutive_failures' => 0,
                 'last_checked_at' => now(),
@@ -84,19 +83,13 @@ class SourceHealthService
                 'check_pending_at' => null,
                 'check_claim_token' => null,
             ])->save();
-
-            return $wasPaused ? $this->sourceIdentity($lockedSource) : null;
         });
-
-        if ($recovered) {
-            $this->notifier->sendSourceRecovered($recovered['type'], $recovered['id'], $recovered['name']);
-        }
     }
 
     public function recordFailure(MonitoredSite|TelegramChannel $source, ?Throwable $exception, ?string $claimToken = null): void
     {
         $message = $this->errorMessage($exception);
-        $transition = DB::transaction(function () use ($source, $message, $claimToken): ?array {
+        $disabledSource = DB::transaction(function () use ($source, $message, $claimToken): ?array {
             $lockedSource = $this->lockSource($source);
 
             if (! $lockedSource?->enabled || ! $this->ownsClaim($lockedSource, $claimToken)) {
@@ -105,7 +98,6 @@ class SourceHealthService
 
             $now = now();
             $previousFailures = (int) $lockedSource->consecutive_failures;
-            $wasPaused = $lockedSource->paused_at !== null;
             $failures = min(255, $previousFailures + 1);
             $errorType = $this->errorType($lockedSource, $message);
             $permanentFailureConfirmed = $failures > self::PAUSE_AFTER_FAILURES
@@ -149,31 +141,14 @@ class SourceHealthService
 
             $lockedSource->forceFill($updates)->save();
 
-            return $this->sourceIdentity($lockedSource) + [
-                'disabled' => $permanentFailureConfirmed,
-                'paused' => ! $permanentFailureConfirmed
-                    && ! $wasPaused
-                    && $failures >= self::PAUSE_AFTER_FAILURES,
-                'next_check_at' => $lockedSource->next_check_at,
-            ];
+            return $permanentFailureConfirmed ? $this->sourceIdentity($lockedSource) : null;
         });
 
-        if (! $transition) {
-            return;
-        }
-
-        if ($transition['disabled']) {
-            $this->notifier->sendSourceDisabled($transition['type'], $transition['id'], $transition['name'], $message);
-
-            return;
-        }
-
-        if ($transition['paused']) {
-            $this->notifier->sendSourcePaused(
-                $transition['type'],
-                $transition['id'],
-                $transition['name'],
-                $transition['next_check_at'],
+        if ($disabledSource) {
+            $this->notifier->sendSourceDisabled(
+                $disabledSource['type'],
+                $disabledSource['id'],
+                $disabledSource['name'],
                 $message,
             );
         }

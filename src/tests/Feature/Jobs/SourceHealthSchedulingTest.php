@@ -29,19 +29,16 @@ class SourceHealthSchedulingTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_third_site_failure_pauses_checking_for_4_hours(): void
+    public function test_third_temporary_site_failure_pauses_checking_without_notification(): void
     {
         Carbon::setTestNow('2026-08-17 12:00:00');
         $site = $this->site(['consecutive_failures' => 2]);
         $monitor = Mockery::mock(ArticleMonitorService::class);
-        $monitor->shouldReceive('ingestSite')->once()->andThrow(new RuntimeException('Site unavailable'));
+        $monitor->shouldReceive('ingestSite')->once()->andThrow(new RuntimeException(
+            'HTML listing request failed: cURL error 28: Connection timed out after 10002 milliseconds',
+        ));
         $notifier = Mockery::mock(TelegramNotifier::class);
-        $notifier->shouldReceive('sendSourcePaused')
-            ->once()
-            ->with('site', $site->id, 'Example News', Mockery::on(
-                fn (Carbon $date): bool => $date->equalTo(now()->addHours(4)),
-            ), Mockery::on(fn (string $message): bool => str_contains($message, 'Site unavailable')))
-            ->andReturnTrue();
+        $notifier->shouldNotReceive('sendSourceDisabled');
 
         (new CheckMonitoredSiteJob($site->id))->handle($monitor, new SourceHealthService($notifier));
 
@@ -58,7 +55,6 @@ class SourceHealthSchedulingTest extends TestCase
         Carbon::setTestNow('2026-08-17 12:00:00');
         $site = $this->site();
         $notifier = Mockery::mock(TelegramNotifier::class);
-        $notifier->shouldNotReceive('sendSourcePaused');
         $healthService = new SourceHealthService($notifier);
 
         $healthService->recordFailure($site, new RuntimeException('Connection failed'));
@@ -111,7 +107,6 @@ class SourceHealthSchedulingTest extends TestCase
         $monitor->shouldReceive('ingestSite')->twice()->andThrow(new RuntimeException('RSS feed returned HTTP 503'));
         $notifier = Mockery::mock(TelegramNotifier::class);
         $notifier->shouldNotReceive('sendSourceDisabled');
-        $notifier->shouldNotReceive('sendSourcePaused');
 
         (new CheckMonitoredSiteJob($site->id))->handle($monitor, new SourceHealthService($notifier));
 
@@ -129,7 +124,7 @@ class SourceHealthSchedulingTest extends TestCase
         $this->assertTrue($site->next_check_at->equalTo(now()->addHours(6)));
     }
 
-    public function test_success_after_pause_restores_normal_site_schedule_and_notifies(): void
+    public function test_success_after_pause_restores_normal_site_schedule_without_notification(): void
     {
         Carbon::setTestNow('2026-08-17 12:00:00');
         $site = $this->site([
@@ -140,7 +135,6 @@ class SourceHealthSchedulingTest extends TestCase
         $monitor = Mockery::mock(ArticleMonitorService::class);
         $monitor->shouldReceive('ingestSite')->once()->andReturn([]);
         $notifier = Mockery::mock(TelegramNotifier::class);
-        $notifier->shouldReceive('sendSourceRecovered')->once()->with('site', $site->id, 'Example News')->andReturnTrue();
 
         (new CheckMonitoredSiteJob($site->id))->handle($monitor, new SourceHealthService($notifier));
 
@@ -197,17 +191,14 @@ class SourceHealthSchedulingTest extends TestCase
         $this->assertTrue($site->fresh()->check_pending_at->equalTo(now()));
     }
 
-    public function test_third_telegram_failure_pauses_channel_for_4_hours(): void
+    public function test_third_telegram_failure_pauses_channel_without_notification(): void
     {
         Carbon::setTestNow('2026-08-17 12:00:00');
         $channel = $this->channel(['consecutive_failures' => 2]);
         $monitor = Mockery::mock(TelegramChannelMonitorService::class);
         $monitor->shouldReceive('ingestChannel')->once()->andThrow(new RuntimeException('Channel unavailable'));
         $notifier = Mockery::mock(TelegramNotifier::class);
-        $notifier->shouldReceive('sendSourcePaused')
-            ->once()
-            ->with('telegram', $channel->id, '@test_channel', Mockery::type(Carbon::class), Mockery::type('string'))
-            ->andReturnTrue();
+        $notifier->shouldNotReceive('sendSourceDisabled');
 
         (new CheckTelegramChannelJob($channel->id))->handle($monitor, new SourceHealthService($notifier));
 
@@ -225,7 +216,6 @@ class SourceHealthSchedulingTest extends TestCase
         $monitor = Mockery::mock(TelegramChannelMonitorService::class);
         $monitor->shouldReceive('ingestChannel')->once()->andThrow(new RuntimeException('AUTH_KEY_UNREGISTERED'));
         $notifier = Mockery::mock(TelegramNotifier::class);
-        $notifier->shouldNotReceive('sendSourcePaused');
         $notifier->shouldNotReceive('sendSourceDisabled');
 
         (new CheckTelegramChannelJob($channel->id))->handle($monitor, new SourceHealthService($notifier));
@@ -269,7 +259,6 @@ class SourceHealthSchedulingTest extends TestCase
         $monitor = Mockery::mock(TelegramChannelMonitorService::class);
         $monitor->shouldReceive('ingestChannel')->once()->andReturn([]);
         $notifier = Mockery::mock(TelegramNotifier::class);
-        $notifier->shouldNotReceive('sendSourceRecovered');
 
         (new CheckTelegramChannelJob($channel->id))->handle($monitor, new SourceHealthService($notifier));
 
