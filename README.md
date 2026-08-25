@@ -115,6 +115,7 @@ docker compose up -d marketing-email-queue
 ```env
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
+TELEGRAM_REVIEW_THREAD_ID=
 TELEGRAM_REPLY_TO_CHAT_ID=-1002354975882
 TELEGRAM_REPLY_TO_MESSAGE_ID=8240
 TELEGRAM_API_ID=
@@ -140,7 +141,7 @@ docker compose up -d marketing-telegram-queue
 
 ## Gmail
 
-Gmail проверяется раз в два часа через History API. Обрабатываются только новые письма с метками `INBOX` и `UNREAD`; спам, архив, отправленные письма, черновики и корзина пропускаются. После совпадения ключа в теме текст отзыва извлекается из тела письма и отправляется в Telegram со ссылкой на Gmail. Затем письмо получает ярлыки совпавших ключей и отмечается прочитанным.
+Gmail проверяется раз в два часа через History API. Обрабатываются только новые письма с метками `INBOX` и `UNREAD`; спам, архив, отправленные письма, черновики и корзина пропускаются. После совпадения ключа в теме текст отзыва извлекается из тела письма и отправляется в тему `TELEGRAM_REVIEW_THREAD_ID` чата `TELEGRAM_CHAT_ID` со ссылкой на Gmail. Если ID темы не задан, сообщение отправляется по общим правилам Telegram-уведомлений. Затем письмо получает ярлыки совпавших ключей и отмечается прочитанным.
 
 Заполните в `src/.env` OAuth-параметры с правом `gmail.modify`:
 

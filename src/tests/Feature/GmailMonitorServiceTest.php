@@ -29,6 +29,7 @@ class GmailMonitorServiceTest extends TestCase
             'services.gmail.refresh_token' => 'gmail-refresh-token',
             'services.telegram.bot_token' => 'telegram-token',
             'services.telegram.chat_id' => '-100123',
+            'services.telegram.review_thread_id' => '9123',
             'services.telegram.reply_to_chat_id' => null,
             'services.telegram.reply_to_message_id' => null,
         ]);
@@ -92,6 +93,7 @@ class GmailMonitorServiceTest extends TestCase
         Http::assertSent(fn (Request $request): bool => str_contains($request->url(), 'api.telegram.org')
             && $request['parse_mode'] === 'HTML'
             && $request['disable_web_page_preview'] === true
+            && $request['message_thread_id'] === 9123
             && str_contains((string) $request['text'], '<b>Новый отзыв</b>')
             && str_contains((string) $request['text'], '<blockquote expandable>Очень хороший врач &lt;спасибо&gt;</blockquote>')
             && str_contains((string) $request['text'], 'https://mail.google.com/mail/u/0/?tab=rm&amp;ogbl#all/thread-message-1')

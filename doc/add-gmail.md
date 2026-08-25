@@ -39,7 +39,10 @@ GMAIL_MONITORING_ENABLED=false
 GMAIL_CLIENT_ID=your-client-id
 GMAIL_CLIENT_SECRET=your-client-secret
 GMAIL_REFRESH_TOKEN=your-refresh-token
+TELEGRAM_REVIEW_THREAD_ID=12345
 ```
+
+`TELEGRAM_REVIEW_THREAD_ID` — ID темы в супергруппе из `TELEGRAM_CHAT_ID`. Он передаётся в Telegram как `message_thread_id` только для отзывов. Если оставить значение пустым, отзывы будут отправляться по общим правилам Telegram-уведомлений.
 
 Очистите кеш конфигурации и проверьте подключение:
 

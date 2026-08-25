@@ -40,8 +40,12 @@ class TelegramNotifier
         ));
     }
 
-    public function sendMessage(string $message, ?string $parseMode = null, bool $disableWebPagePreview = false): bool
-    {
+    public function sendMessage(
+        string $message,
+        ?string $parseMode = null,
+        bool $disableWebPagePreview = false,
+        ?int $messageThreadId = null,
+    ): bool {
         $token = config('services.telegram.bot_token');
         $chatId = config('services.telegram.chat_id');
 
@@ -61,10 +65,14 @@ class TelegramNotifier
             $payload['parse_mode'] = $parseMode;
         }
 
+        if ($messageThreadId !== null) {
+            $payload['message_thread_id'] = $messageThreadId;
+        }
+
         $replyToChatId = config('services.telegram.reply_to_chat_id');
         $replyToMessageId = config('services.telegram.reply_to_message_id');
 
-        if ($replyToChatId && $replyToMessageId && (string) $chatId === (string) $replyToChatId) {
+        if ($messageThreadId === null && $replyToChatId && $replyToMessageId && (string) $chatId === (string) $replyToChatId) {
             $payload['reply_to_message_id'] = (int) $replyToMessageId;
         }
 
@@ -128,6 +136,7 @@ class TelegramNotifier
 
         $review = trim($review) !== '' ? trim($review) : 'Отзыв отсутствует';
         $truncated = "\n\n[текст сокращён]";
+        $threadId = config('services.telegram.review_thread_id');
 
         if (mb_strlen($review, 'UTF-8') > 3000) {
             $review = mb_substr($review, 0, 3000 - mb_strlen($truncated, 'UTF-8'), 'UTF-8').$truncated;
@@ -143,7 +152,7 @@ class TelegramNotifier
             $this->escapeHtml($subject),
             $link,
             $this->escapeHtml($review),
-        ), 'HTML', true);
+        ), 'HTML', true, is_numeric($threadId) ? (int) $threadId : null);
     }
 
     public function sendSourceDisabled(string $type, int $id, string $name, string $reason): bool

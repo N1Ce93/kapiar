@@ -102,6 +102,9 @@ class TelegramNotifierTest extends TestCase
             'app.timezone' => 'Europe/Kyiv',
             'services.telegram.bot_token' => 'test-token',
             'services.telegram.chat_id' => '-1002354975882',
+            'services.telegram.review_thread_id' => '9123',
+            'services.telegram.reply_to_chat_id' => '-1002354975882',
+            'services.telegram.reply_to_message_id' => '8240',
         ]);
         Http::fake(['api.telegram.org/*' => Http::response(['ok' => true])]);
 
@@ -114,7 +117,9 @@ class TelegramNotifierTest extends TestCase
 
         Http::assertSent(fn ($request): bool => $request['text'] === "<b>Новый отзыв</b>\n\n<b>Дата:</b> 2026-08-24 12:00\n<b>Тема:</b> Оставить &lt;свой&gt; отзыв\n<b>Письмо:</b> <a href=\"https://mail.google.com/mail/u/0/?tab=rm&amp;ogbl#all/thread-1\">Открыть в Gmail</a>\n\n<b>Отзыв:</b>\n<blockquote expandable>Хорошо &amp; быстро</blockquote>"
             && $request['parse_mode'] === 'HTML'
-            && $request['disable_web_page_preview'] === true);
+            && $request['disable_web_page_preview'] === true
+            && $request['message_thread_id'] === 9123
+            && ! isset($request['reply_to_message_id']));
     }
 
     public function test_it_replaces_an_empty_gmail_review_and_truncates_a_long_one(): void
