@@ -139,6 +139,24 @@ class ArticleDiscoveryServiceTest extends TestCase
         }
     }
 
+    public function test_rss_discovery_prefers_full_encoded_content_over_description(): void
+    {
+        Http::fake(['*' => Http::response(<<<'XML'
+            <rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+                <channel><item>
+                    <title>Операція</title>
+                    <link>https://example.com/news/operation</link>
+                    <description>Короткий опис.</description>
+                    <content:encoded><![CDATA[<p>Повний текст.</p><p>Лікарі провели операцію.</p>]]></content:encoded>
+                </item></channel>
+            </rss>
+            XML, 200)]);
+
+        $items = $this->service()->discover($this->rssSite(), 25);
+
+        $this->assertSame('Повний текст. Лікарі провели операцію.', $items[0]['excerpt']);
+    }
+
     private function service(): ArticleDiscoveryService
     {
         return new ArticleDiscoveryService(new SiteProbeService);
@@ -163,6 +181,17 @@ class ArticleDiscoveryServiceTest extends TestCase
             'source_type' => 'html',
             'listing_url' => 'https://ria-m.tv/ua/news/',
             'article_url_pattern' => '~^/ua/news/[0-9]+/[^/]+\.html$~u',
+            'enabled' => true,
+        ]);
+    }
+
+    private function rssSite(): MonitoredSite
+    {
+        return new MonitoredSite([
+            'name' => 'RSS Example',
+            'base_url' => 'https://example.com/',
+            'source_type' => 'rss',
+            'feed_url' => 'https://example.com/feed/',
             'enabled' => true,
         ]);
     }

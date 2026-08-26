@@ -10,6 +10,8 @@ use Illuminate\Support\Carbon;
 
 class ArticleMonitorService
 {
+    private const MIN_EXCERPT_FALLBACK_LENGTH = 100;
+
     public function __construct(
         private readonly ArticleDiscoveryService $discoveryService,
         private readonly ArticleTextExtractor $textExtractor,
@@ -37,12 +39,21 @@ class ArticleMonitorService
             );
 
             if (! $article->wasRecentlyCreated) {
+                if ($item['excerpt'] && mb_strlen($item['excerpt'], 'UTF-8') > mb_strlen((string) $article->excerpt, 'UTF-8')) {
+                    $article->forceFill(['excerpt' => $item['excerpt']])->save();
+                }
+
                 $stats['skipped']++;
 
-                if ($backfill && $analyze && $article->checked_at === null) {
-                    $processStats = $this->processArticle($article, notify: false, contentSelector: $site->content_selector);
+                if ($analyze && ($article->checked_at === null || $article->content_hash === null)) {
+                    $processStats = $this->processArticle(
+                        $article,
+                        notify: ! $backfill && ! $article->is_backfilled && $notify,
+                        contentSelector: $site->content_selector,
+                    );
                     $stats['analyzed']++;
                     $stats['hits'] += $processStats['hits'];
+                    $stats['sent'] += $processStats['sent'];
                 }
 
                 continue;
@@ -67,11 +78,21 @@ class ArticleMonitorService
     public function processArticle(Article $article, bool $notify, ?string $contentSelector = null): array
     {
         $extracted = $this->textExtractor->extract($article->url, $contentSelector);
+        $excerpt = trim((string) $article->excerpt);
 
         if ($extracted === null) {
-            $article->forceFill(['checked_at' => now()])->save();
+            if (mb_strlen($excerpt, 'UTF-8') < self::MIN_EXCERPT_FALLBACK_LENGTH) {
+                return ['hits' => 0, 'sent' => 0];
+            }
 
-            return ['hits' => 0, 'sent' => 0];
+            $extracted = [
+                'title' => null,
+                'text' => $excerpt,
+                'hash' => hash('sha256', $excerpt),
+            ];
+        } elseif (mb_strlen($excerpt, 'UTF-8') > mb_strlen($extracted['text'], 'UTF-8')) {
+            $extracted['text'] = $excerpt;
+            $extracted['hash'] = hash('sha256', $excerpt);
         }
 
         $article->forceFill([

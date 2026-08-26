@@ -124,10 +124,15 @@ class ArticleDiscoveryService
                     continue;
                 }
 
+                $namespaces = $item->getNameSpaces(true);
+                $encodedContent = isset($namespaces['content'])
+                    ? (string) $item->children($namespaces['content'])->encoded
+                    : '';
+
                 $items[] = [
                     'url' => $url,
                     'title' => $this->cleanText((string) $item->title),
-                    'excerpt' => $this->cleanText((string) $item->description),
+                    'excerpt' => $this->cleanText($encodedContent ?: (string) $item->description),
                     'published_at' => $this->parseDate((string) $item->pubDate),
                 ];
             }
@@ -259,7 +264,8 @@ class ArticleDiscoveryService
 
     private function cleanText(mixed $text): ?string
     {
-        $text = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags((string) $text), ENT_QUOTES | ENT_HTML5, 'UTF-8')) ?: '');
+        $text = preg_replace('/<[^>]+>/', ' ', (string) $text) ?? '';
+        $text = trim(preg_replace('/\s+/u', ' ', html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8')) ?: '');
 
         return $text === '' ? null : $text;
     }

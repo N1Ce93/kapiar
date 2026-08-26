@@ -43,6 +43,31 @@ class ArticleTextExtractorTest extends TestCase
         $this->assertStringContainsString('ЗОКБ', $article['text']);
     }
 
+    public function test_it_converts_legacy_page_encoding_to_utf8(): void
+    {
+        $html = mb_convert_encoding(
+            $this->html('<div id="interview"><h1>Новость</h1><div>Лікарі провели складну операцію.</div></div>'),
+            'Windows-1251',
+            'UTF-8',
+        );
+        Http::fake(['*' => Http::response($html, 200, ['Content-Type' => 'text/html; charset=windows-1251'])]);
+
+        $article = (new ArticleTextExtractor)->extract('https://example.com/news/1', '#interview h1 ~ div');
+
+        $this->assertSame('Лікарі провели складну операцію.', $article['text']);
+    }
+
+    public function test_it_keeps_configured_content_nested_in_a_header(): void
+    {
+        Http::fake(['*' => Http::response($this->html(
+            '<header><nav>Меню</nav><div class="entry-content">Повний текст матеріалу.</div></header>',
+        ))]);
+
+        $article = (new ArticleTextExtractor)->extract('https://example.com/news/1', '.entry-content');
+
+        $this->assertSame('Повний текст матеріалу.', $article['text']);
+    }
+
     private function html(string $body): string
     {
         return '<html><head><meta property="og:title" content="Заголовок"></head><body>'.$body.'</body></html>';

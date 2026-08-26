@@ -5,6 +5,7 @@ namespace App\Services\Monitoring;
 use DOMDocument;
 use DOMNode;
 use DOMXPath;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\CssSelector\CssSelectorConverter;
@@ -29,23 +30,26 @@ class ArticleTextExtractor
             return null;
         }
 
+        $html = $this->utf8Html($response);
         $dom = new DOMDocument('1.0', 'UTF-8');
         $previous = libxml_use_internal_errors(true);
-        $dom->loadHTML('<?xml encoding="UTF-8">'.$response->body(), LIBXML_NOWARNING | LIBXML_NOERROR);
+        $dom->loadHTML('<?xml encoding="UTF-8">'.$html, LIBXML_NOWARNING | LIBXML_NOERROR);
         libxml_clear_errors();
         libxml_use_internal_errors($previous);
 
         $xpath = new DOMXPath($dom);
         $title = $this->metaContent($xpath, 'og:title') ?: $this->nodeText($xpath, '//h1') ?: $this->nodeText($xpath, '//title');
+        $configuredBody = $this->configuredContentNode($xpath, $url, $contentSelector);
 
-        foreach ($xpath->query('//script|//style|//noscript|//svg|//nav|//header|//footer|//aside|//form') as $node) {
-            $node->parentNode?->removeChild($node);
+        if ($configuredBody) {
+            $this->removeNoise($xpath, $configuredBody);
+            $body = $configuredBody;
+        } else {
+            $this->removeNoise($xpath);
+            $body = $xpath->query('//article')->item(0)
+                ?: $xpath->query('//main')->item(0)
+                ?: $xpath->query('//body')->item(0);
         }
-
-        $body = $this->configuredContentNode($xpath, $url, $contentSelector)
-            ?: $xpath->query('//article')->item(0)
-            ?: $xpath->query('//main')->item(0)
-            ?: $xpath->query('//body')->item(0);
         $text = $this->normalizeText($body?->textContent ?? '');
 
         if ($text === '') {
@@ -108,5 +112,38 @@ class ArticleTextExtractor
     private function normalizeText(string $text): string
     {
         return trim(preg_replace('/\s+/u', ' ', html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8')) ?: '');
+    }
+
+    private function removeNoise(DOMXPath $xpath, ?DOMNode $scope = null): void
+    {
+        $query = ($scope ? './/' : '//').'script|'.($scope ? './/' : '//').'style|'.($scope ? './/' : '//').'noscript|'
+            .($scope ? './/' : '//').'svg|'.($scope ? './/' : '//').'nav|'.($scope ? './/' : '//').'header|'
+            .($scope ? './/' : '//').'footer|'.($scope ? './/' : '//').'aside|'.($scope ? './/' : '//').'form';
+
+        foreach ($xpath->query($query, $scope) as $node) {
+            $node->parentNode?->removeChild($node);
+        }
+    }
+
+    private function utf8Html(Response $response): string
+    {
+        $html = $response->body();
+        $sample = (string) $response->header('Content-Type').' '.substr($html, 0, 4096);
+
+        if (! preg_match('~charset\s*=\s*["\']?([a-z0-9._-]+)~i', $sample, $match)) {
+            return $html;
+        }
+
+        $encoding = strtolower($match[1]);
+
+        if (in_array($encoding, ['utf-8', 'utf8'], true)) {
+            return $html;
+        }
+
+        try {
+            return mb_convert_encoding($html, 'UTF-8', $encoding);
+        } catch (Throwable) {
+            return $html;
+        }
     }
 }
