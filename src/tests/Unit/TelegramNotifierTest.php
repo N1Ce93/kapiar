@@ -5,6 +5,7 @@ namespace Tests\Unit;
 use App\Models\TelegramChannel;
 use App\Models\TelegramMessage;
 use App\Services\Monitoring\TelegramNotifier;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -56,6 +57,40 @@ class TelegramNotifierTest extends TestCase
         Http::fake(['api.telegram.org/*' => Http::response(['ok' => false], 200)]);
 
         $this->assertFalse((new TelegramNotifier)->sendMessage('Test message'));
+    }
+
+    public function test_it_sends_an_xlsx_document_to_the_configured_topic_anchor(): void
+    {
+        config([
+            'services.telegram.bot_token' => 'test-token',
+            'services.telegram.chat_id' => '-1002354975882',
+            'services.telegram.reply_to_chat_id' => '-1002354975882',
+            'services.telegram.reply_to_message_id' => '8240',
+        ]);
+        Http::fake(['api.telegram.org/*' => Http::response(['ok' => true])]);
+        $path = tempnam(sys_get_temp_dir(), 'monthly-report-');
+        file_put_contents($path, 'xlsx contents');
+
+        try {
+            $this->assertTrue((new TelegramNotifier)->sendDocument(
+                $path,
+                'report_2026-08.xlsx',
+                'Отчет за месяц Август 2026',
+            ));
+        } finally {
+            @unlink($path);
+        }
+
+        Http::assertSent(function (Request $request): bool {
+            $parts = collect($request->data())->keyBy('name');
+
+            return str_ends_with($request->url(), '/sendDocument')
+                && $request->isMultipart()
+                && $request->hasFile('document', filename: 'report_2026-08.xlsx')
+                && $parts->get('chat_id')['contents'] === '-1002354975882'
+                && $parts->get('caption')['contents'] === 'Отчет за месяц Август 2026'
+                && $parts->get('reply_to_message_id')['contents'] === 8240;
+        });
     }
 
     public function test_it_formats_telegram_post_date_in_app_timezone(): void

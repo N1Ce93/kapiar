@@ -104,6 +104,72 @@ class TelegramNotifier
         return true;
     }
 
+    public function sendDocument(string $path, string $filename, string $caption): bool
+    {
+        $token = config('services.telegram.bot_token');
+        $chatId = config('services.telegram.chat_id');
+
+        if (! $token || ! $chatId) {
+            Log::info('Telegram is not configured; document was not sent.');
+
+            return false;
+        }
+
+        $stream = @fopen($path, 'r');
+
+        if ($stream === false) {
+            Log::warning('Telegram document could not be opened.', ['path' => $path]);
+
+            return false;
+        }
+
+        $payload = [
+            'chat_id' => $chatId,
+            'caption' => mb_substr($caption, 0, 1024, 'UTF-8'),
+        ];
+        $replyToChatId = config('services.telegram.reply_to_chat_id');
+        $replyToMessageId = config('services.telegram.reply_to_message_id');
+
+        if ($replyToChatId && $replyToMessageId && (string) $chatId === (string) $replyToChatId) {
+            $payload['reply_to_message_id'] = (int) $replyToMessageId;
+        }
+
+        try {
+            $response = Http::timeout(60)
+                ->attach('document', $stream, $filename, [
+                    'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                ])
+                ->post('https://api.telegram.org/bot'.$token.'/sendDocument', $payload);
+        } catch (Throwable $exception) {
+            Log::warning('Telegram document send failed.', ['error' => $this->redact((string) $exception->getMessage())]);
+
+            return false;
+        } finally {
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
+        }
+
+        if (! $response->successful()) {
+            Log::warning('Telegram document send returned non-success response.', [
+                'status' => $response->status(),
+                'body' => $this->redact($response->body()),
+            ]);
+
+            return false;
+        }
+
+        if ($response->json('ok') !== true) {
+            Log::warning('Telegram document send returned an invalid success response.', [
+                'body' => $this->redact($response->body()),
+            ]);
+
+            return false;
+        }
+
+        return true;
+    }
+
     /** @param list<string> $keywords */
     public function sendTelegramChannelMention(TelegramMessage $message, array $keywords, ?string $context = null): bool
     {

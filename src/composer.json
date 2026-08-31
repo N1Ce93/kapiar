@@ -10,6 +10,7 @@
         "danog/madelineproto": "^8.7",
         "laravel/framework": "^13.8",
         "laravel/tinker": "^3.0",
+        "openspout/openspout": "^4.32",
         "symfony/css-selector": "^8.1"
     },
     "require-dev": {
