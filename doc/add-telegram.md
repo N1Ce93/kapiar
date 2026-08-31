@@ -260,12 +260,23 @@ docker compose run --rm marketing-php php artisan telegram-channels:enable "http
 
 Команда сбрасывает ошибки и паузу, сохраняя `last_message_id`, и назначает проверку на ближайший запуск scheduler. Этой же командой можно досрочно возобновить уже включённый, но приостановленный канал. Для постановки job требуется `TELEGRAM_MONITORING_ENABLED=true`.
 
+## 11. Удалить Telegram-Канал
+
+Удалить канал из мониторинга по ID вместе со всеми собранными сообщениями и совпадениями ключевых слов:
+
+```bash
+docker compose run --rm marketing-php php artisan telegram-channels:delete 17
+```
+
+Команда показывает количество сообщений и запрашивает подтверждение. Для запуска без подтверждения используйте `--force`. Общие ключевые слова не удаляются. Канал удаляется только из базы мониторинга, а не из Telegram.
+
 ## Список Команд
 
 ```bash
 docker compose run --rm -it marketing-php php artisan telegram:login
 docker compose run --rm marketing-php php artisan telegram:status
 docker compose run --rm marketing-php php artisan telegram-channels:add "https://t.me/zoda_gov_ua"
+docker compose run --rm marketing-php php artisan telegram-channels:delete 17
 docker compose run --rm marketing-php php artisan telegram-channels:enable 17
 docker compose run --rm marketing-php php artisan telegram-channels:backfill --limit=500
 docker compose run --rm marketing-php php artisan telegram-channels:check

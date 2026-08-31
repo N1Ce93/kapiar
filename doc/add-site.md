@@ -9,7 +9,7 @@
 Перед добавлением проверьте, сможет ли приложение читать сайт через RSS или HTML:
 
 ```bash
-docker compose run --rm marketing-php php artisan sites:probe "https://example.com/"
+docker compose run --rm marketing-php php artisan sites:probe "https://www.soda.zp.ua/"
 ```
 
 Команда покажет:
@@ -46,7 +46,7 @@ docker compose run --rm marketing-php php artisan sites:add "https://example.com
 ## 3. Добавить Сайт С Названием
 
 ```bash
-docker compose run --rm marketing-php php artisan sites:add "https://example.com/" --name="Example News"
+docker compose run --rm marketing-php php artisan sites:add "" --name="Example News"
 ```
 
 Параметр `--name` задает человекочитаемое название сайта.
