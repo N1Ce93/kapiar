@@ -239,12 +239,22 @@ class TelegramNotifier
         )));
     }
 
+    public function sendGmailMonitoringPaused(string $reason): bool
+    {
+        return $this->sendMessage(trim(sprintf(
+            "Проверка Gmail остановлена\n\nПричина: %s\n\nПосле исправления выполните:\ndocker compose exec marketing-php php artisan gmail:resume",
+            mb_substr($this->redact($reason), 0, 2000, 'UTF-8'),
+        )));
+    }
+
     private function redact(string $text): string
     {
         $token = (string) config('services.telegram.bot_token');
         $apiHash = (string) config('services.telegram.api_hash');
+        $gmailClientSecret = (string) config('services.gmail.client_secret');
+        $gmailRefreshToken = (string) config('services.gmail.refresh_token');
 
-        foreach (array_filter([$token, $apiHash]) as $secret) {
+        foreach (array_filter([$token, $apiHash, $gmailClientSecret, $gmailRefreshToken]) as $secret) {
             $text = str_replace($secret, '[redacted]', $text);
         }
 

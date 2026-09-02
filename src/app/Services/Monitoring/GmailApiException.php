@@ -9,7 +9,14 @@ class GmailApiException extends RuntimeException
     public function __construct(
         public readonly int $status,
         string $operation,
+        ?string $detail = null,
     ) {
-        parent::__construct(sprintf('Gmail API %s failed with HTTP %d.', $operation, $status));
+        $message = sprintf('Gmail API %s failed with HTTP %d.', $operation, $status);
+
+        if ($detail !== null && trim($detail) !== '') {
+            $message .= ' '.trim($detail);
+        }
+
+        parent::__construct($message);
     }
 }

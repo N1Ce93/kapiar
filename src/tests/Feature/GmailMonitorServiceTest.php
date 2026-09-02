@@ -5,8 +5,10 @@ namespace Tests\Feature;
 use App\Models\EmailSubjectKeyword;
 use App\Models\GmailMonitorState;
 use App\Models\GmailProcessingMessage;
+use App\Services\Monitoring\GmailApiClient;
 use App\Services\Monitoring\GmailApiException;
 use App\Services\Monitoring\GmailMonitorService;
+use App\Services\Monitoring\InvalidGmailLabelException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Carbon;
@@ -169,7 +171,7 @@ class GmailMonitorServiceTest extends TestCase
         Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/messages/message-1/modify'));
     }
 
-    public function test_an_invalid_system_label_does_not_block_other_pending_messages(): void
+    public function test_an_invalid_system_label_stops_pending_delivery(): void
     {
         $state = $this->state();
         GmailProcessingMessage::create([
@@ -198,12 +200,23 @@ class GmailMonitorServiceTest extends TestCase
             ]],
         ]));
 
-        $stats = app(GmailMonitorService::class)->check();
+        try {
+            app(GmailMonitorService::class)->check();
+            $this->fail('Expected the invalid Gmail label to fail.');
+        } catch (InvalidGmailLabelException $exception) {
+            $this->assertSame('Gmail label must be a user label: SPAM', $exception->getMessage());
+        }
 
-        $this->assertSame(1, $stats['completed']);
-        $this->assertSame(1, $stats['pending']);
-        $this->assertDatabaseHas('gmail_processing_messages', ['gmail_message_id' => 'message-invalid']);
-        $this->assertDatabaseMissing('gmail_processing_messages', ['gmail_message_id' => 'message-valid']);
+        $this->assertDatabaseHas('gmail_processing_messages', [
+            'gmail_message_id' => 'message-invalid',
+            'attempts' => 1,
+            'last_error' => 'Gmail label must be a user label: SPAM',
+        ]);
+        $this->assertDatabaseHas('gmail_processing_messages', [
+            'gmail_message_id' => 'message-valid',
+            'attempts' => 0,
+        ]);
+        Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), 'api.telegram.org'));
     }
 
     public function test_gmail_modify_is_retried_without_sending_telegram_again(): void
@@ -290,6 +303,27 @@ class GmailMonitorServiceTest extends TestCase
         $this->expectExceptionMessage('Gmail OAuth account changed');
 
         app(GmailMonitorService::class)->check();
+    }
+
+    public function test_oauth_refresh_errors_include_google_error_details(): void
+    {
+        Http::fake([
+            'oauth2.googleapis.com/token' => Http::response([
+                'error' => 'invalid_grant',
+                'error_description' => 'Token has been expired or revoked.',
+            ], 400),
+        ]);
+
+        try {
+            app(GmailApiClient::class)->profile();
+            $this->fail('Expected the OAuth refresh to fail.');
+        } catch (GmailApiException $exception) {
+            $this->assertSame(400, $exception->status);
+            $this->assertSame(
+                'Gmail API OAuth token refresh failed with HTTP 400. invalid_grant: Token has been expired or revoked.',
+                $exception->getMessage(),
+            );
+        }
     }
 
     private function state(): GmailMonitorState

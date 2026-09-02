@@ -183,12 +183,7 @@ class GmailMonitorService
                         review: $extracted['review'],
                         gmailUrl: $this->gmailUrl((string) ($message['threadId'] ?? '')),
                     )) {
-                        $processing->forceFill([
-                            'attempts' => $processing->attempts + 1,
-                            'last_error' => 'Telegram notification was not accepted.',
-                        ])->save();
-
-                        break;
+                        throw new RuntimeException('Telegram notification was not accepted.');
                     }
 
                     $processing->forceFill([
@@ -213,7 +208,7 @@ class GmailMonitorService
                     'last_error' => mb_substr($exception->getMessage(), 0, 4000, 'UTF-8'),
                 ])->save();
 
-                continue;
+                throw $exception;
             } catch (Throwable $exception) {
                 $processing->forceFill([
                     'attempts' => $processing->attempts + 1,

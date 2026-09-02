@@ -4,6 +4,8 @@ namespace App\Jobs;
 
 use App\Services\Monitoring\GmailCheckAlreadyRunningException;
 use App\Services\Monitoring\GmailCheckRunner;
+use App\Services\Monitoring\GmailMonitoringControl;
+use App\Services\Monitoring\GmailMonitoringPausedException;
 use App\Services\Monitoring\GmailMonitorService;
 use Closure;
 use Illuminate\Bus\Queueable;
@@ -12,12 +14,15 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Queue\TimeoutExceededException;
+use Illuminate\Support\Facades\Cache;
+use Throwable;
 
 class CheckGmailJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 3;
+    public int $tries = 1;
 
     public int $timeout = 900;
 
@@ -34,15 +39,20 @@ class CheckGmailJob implements ShouldBeUnique, ShouldQueue
     {
         try {
             $runner->run(fn (Closure $heartbeat): array => $monitor->check($heartbeat));
-        } catch (GmailCheckAlreadyRunningException) {
-            $this->release(60);
+        } catch (GmailCheckAlreadyRunningException|GmailMonitoringPausedException) {
+            return;
         }
     }
 
-    /** @return list<int> */
-    public function backoff(): array
+    public function failed(?Throwable $exception): void
     {
-        return [60, 300];
+        try {
+            app(GmailMonitoringControl::class)->pause($exception);
+        } finally {
+            if ($exception instanceof TimeoutExceededException) {
+                Cache::lock(GmailCheckRunner::LOCK_KEY, GmailCheckRunner::LOCK_SECONDS)->forceRelease();
+            }
+        }
     }
 
     public function uniqueId(): string

@@ -178,4 +178,25 @@ class TelegramNotifierTest extends TestCase
         Http::assertSent(fn ($request): bool => str_contains($request['text'], '[текст сокращён]</blockquote>')
             && mb_strlen(html_entity_decode(strip_tags($request['text'])), 'UTF-8') < 4096);
     }
+
+    public function test_it_sends_a_sanitized_gmail_pause_notification(): void
+    {
+        config([
+            'services.telegram.bot_token' => 'test-token',
+            'services.telegram.chat_id' => '-1002354975882',
+            'services.gmail.client_secret' => 'gmail-client-secret',
+            'services.gmail.refresh_token' => 'gmail-refresh-token',
+        ]);
+        Http::fake(['api.telegram.org/*' => Http::response(['ok' => true])]);
+
+        $this->assertTrue((new TelegramNotifier)->sendGmailMonitoringPaused(
+            'OAuth failed for gmail-client-secret and gmail-refresh-token',
+        ));
+
+        Http::assertSent(fn ($request): bool => str_contains($request['text'], 'Проверка Gmail остановлена')
+            && str_contains($request['text'], 'OAuth failed for [redacted] and [redacted]')
+            && str_contains($request['text'], 'php artisan gmail:resume')
+            && ! str_contains($request['text'], 'gmail-client-secret')
+            && ! str_contains($request['text'], 'gmail-refresh-token'));
+    }
 }

@@ -214,7 +214,15 @@ class GmailApiClient
         ]);
 
         if (! $response->successful()) {
-            throw new GmailApiException($response->status(), 'OAuth token refresh');
+            $error = trim((string) $response->json('error', ''));
+            $description = trim((string) $response->json('error_description', ''));
+            $detail = trim($error.($description === '' ? '' : ': '.$description));
+
+            throw new GmailApiException(
+                $response->status(),
+                'OAuth token refresh',
+                $detail === '' ? null : mb_substr($detail, 0, 1000, 'UTF-8'),
+            );
         }
 
         $token = (string) $response->json('access_token', '');

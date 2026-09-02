@@ -4,6 +4,7 @@ namespace App\Services\Monitoring;
 
 use Closure;
 use Illuminate\Support\Facades\Cache;
+use RuntimeException;
 
 class GmailCheckRunner
 {
@@ -11,8 +12,16 @@ class GmailCheckRunner
 
     public const LOCK_SECONDS = 1200;
 
+    public function __construct(
+        private readonly GmailMonitoringControl $control,
+    ) {}
+
     public function run(Closure $callback): mixed
     {
+        if ($this->control->isPaused()) {
+            throw new GmailMonitoringPausedException('Gmail monitoring is paused. Run gmail:resume after fixing the error.');
+        }
+
         $lock = Cache::lock(self::LOCK_KEY, self::LOCK_SECONDS);
 
         if (! $lock->get()) {
@@ -20,9 +29,13 @@ class GmailCheckRunner
         }
 
         try {
+            if ($this->control->isPaused()) {
+                throw new GmailMonitoringPausedException('Gmail monitoring is paused. Run gmail:resume after fixing the error.');
+            }
+
             return $callback(function () use ($lock): void {
                 if (! $lock->refresh(self::LOCK_SECONDS)) {
-                    throw new GmailCheckAlreadyRunningException('The Gmail check lock was lost.');
+                    throw new RuntimeException('The Gmail check lock was lost.');
                 }
             });
         } finally {

@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Jobs\CheckGmailJob;
+use App\Services\Monitoring\GmailMonitoringControl;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
@@ -11,10 +12,16 @@ use Illuminate\Console\Command;
 #[Description('Dispatch the Gmail monitor to the email queue')]
 class GmailDispatchChecksCommand extends Command
 {
-    public function handle(): int
+    public function handle(GmailMonitoringControl $control): int
     {
         if (! config('services.gmail.monitoring_enabled')) {
             $this->warn('Gmail monitoring is disabled. Set GMAIL_MONITORING_ENABLED=true to dispatch checks.');
+
+            return self::SUCCESS;
+        }
+
+        if ($control->isPaused()) {
+            $this->warn('Gmail monitoring is paused. Run gmail:resume after fixing the error.');
 
             return self::SUCCESS;
         }

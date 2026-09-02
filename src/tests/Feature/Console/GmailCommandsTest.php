@@ -9,6 +9,7 @@ use App\Models\GmailProcessingMessage;
 use App\Services\Monitoring\GmailCheckAlreadyRunningException;
 use App\Services\Monitoring\GmailCheckRunner;
 use Closure;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Queue;
@@ -107,5 +108,18 @@ class GmailCommandsTest extends TestCase
         });
 
         $this->assertSame('completed', $result);
+    }
+
+    public function test_gmail_checks_are_scheduled_during_business_hours_in_kyiv(): void
+    {
+        $event = collect(app(Schedule::class)->events())
+            ->first(fn ($event): bool => str_contains($event->command, 'gmail:dispatch-check'));
+
+        $this->assertNotNull($event);
+        $this->assertSame('0 8,10,12,14,16 * * *', $event->expression);
+        $this->assertSame('Europe/Kyiv', $event->timezone);
+        $this->assertTrue($event->withoutOverlapping);
+        $this->assertTrue($event->onOneServer);
+        $this->assertSame(20, $event->expiresAt);
     }
 }

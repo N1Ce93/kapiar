@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\GmailMonitorState;
 use App\Services\Monitoring\GmailApiClient;
+use App\Services\Monitoring\GmailMonitoringControl;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
@@ -13,8 +14,20 @@ use Throwable;
 #[Description('Check Gmail OAuth access and monitoring state')]
 class GmailStatusCommand extends Command
 {
-    public function handle(GmailApiClient $gmail): int
+    public function handle(GmailApiClient $gmail, GmailMonitoringControl $control): int
     {
+        $monitoring = $control->state();
+
+        if ($monitoring->paused_at !== null) {
+            $this->error('Gmail monitoring is paused.');
+            $this->line('Paused at: '.$monitoring->paused_at->timezone(config('app.timezone'))->format('Y-m-d H:i:s'));
+            $this->line('Reason: '.($monitoring->last_error ?: '-'));
+            $this->line('Telegram alert delivered: '.($monitoring->alert_delivered_at ? 'yes' : 'no'));
+            $this->line('Resume: php artisan gmail:resume');
+
+            return self::FAILURE;
+        }
+
         try {
             $profile = $gmail->profile();
         } catch (Throwable $exception) {

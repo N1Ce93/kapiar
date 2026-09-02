@@ -152,7 +152,7 @@ services:
       - "./src:/app"
       - "./docker/php/php.ini:/usr/local/etc/php/conf.d/custom.ini"
     working_dir: "/app"
-    command: "php artisan queue:work --queue=email --timeout=960 --tries=3 --backoff=60 --max-time=3600 --max-jobs=500"
+    command: "php artisan queue:work --queue=email --timeout=960 --tries=1 --max-time=3600 --max-jobs=500"
     healthcheck:
       test: ["CMD", "php", "artisan", "queue:monitor", "redis:email", "--max=200"]
       interval: 60s

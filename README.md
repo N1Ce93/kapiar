@@ -141,7 +141,7 @@ docker compose up -d marketing-telegram-queue
 
 ## Gmail
 
-Gmail проверяется раз в два часа через History API. Обрабатываются только новые письма с метками `INBOX` и `UNREAD`; спам, архив, отправленные письма, черновики и корзина пропускаются. После совпадения ключа в теме текст отзыва извлекается из тела письма и отправляется в тему `TELEGRAM_REVIEW_THREAD_ID` чата `TELEGRAM_CHAT_ID` со ссылкой на Gmail. Если ID темы не задан, сообщение отправляется по общим правилам Telegram-уведомлений. Затем письмо получает ярлыки совпавших ключей и отмечается прочитанным.
+Gmail проверяется в `08:00`, `10:00`, `12:00`, `14:00` и `16:00` по Киеву через History API. Обрабатываются только новые письма с метками `INBOX` и `UNREAD`; спам, архив, отправленные письма, черновики и корзина пропускаются. После совпадения ключа в теме текст отзыва извлекается из тела письма и отправляется в тему `TELEGRAM_REVIEW_THREAD_ID` чата `TELEGRAM_CHAT_ID` со ссылкой на Gmail. Если ID темы не задан, сообщение отправляется по общим правилам Telegram-уведомлений. Затем письмо получает ярлыки совпавших ключей и отмечается прочитанным.
 
 Заполните в `src/.env` OAuth-параметры с правом `gmail.modify`:
 
@@ -169,13 +169,20 @@ docker compose up -d marketing-email-queue
 
 Успешно обработанные письма в базе не сохраняются. Временная запись содержит только Gmail message ID, совпавшие ключи, целевые ярлыки и этап обработки; тема и тело письма в БД не записываются. Запись удаляется после изменения письма в Gmail. Подробная настройка: [Как подключить Gmail](doc/add-gmail.md).
 
-## Release / Deploy Runbook
-
-Перед деплоем остановите новые dispatch-и и мягко перезапустите workers:
+При ошибке повторных попыток нет: мониторинг ставится на паузу и один раз отправляет причину в Telegram. После исправления возобновите мониторинг и сразу запустите проверку:
 
 ```bash
-docker compose stop marketing-scheduler
-docker compose exec marketing-php php artisan queue:restart
+docker compose exec marketing-php php artisan gmail:resume
+```
+
+## Release / Deploy Runbook
+
+Перед деплоем остановите scheduler и workers, обновите основной контейнер и примените миграции до запуска нового кода:
+
+```bash
+docker compose stop marketing-scheduler marketing-sources-queue marketing-telegram-queue marketing-email-queue
+docker compose up -d --build marketing-php
+docker compose exec marketing-php php artisan migrate --force
 docker compose up -d --build marketing-php marketing-scheduler marketing-sources-queue marketing-email-queue
 ```
 

@@ -51,6 +51,12 @@ docker compose run --rm marketing-php php artisan config:clear
 docker compose run --rm marketing-php php artisan gmail:status
 ```
 
+Проверка запускается в `08:00`, `10:00`, `12:00`, `14:00` и `16:00` по Киеву. При ошибке повторных попыток нет: мониторинг ставится на паузу, а причина один раз отправляется в Telegram. После исправления возобновите мониторинг и сразу поставьте проверку в очередь:
+
+```bash
+docker compose exec marketing-php php artisan gmail:resume
+```
+
 ## Первый запуск
 
 Примените миграции и сохраните начальный Gmail checkpoint:
