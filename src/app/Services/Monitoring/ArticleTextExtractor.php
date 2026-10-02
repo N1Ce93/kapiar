@@ -13,9 +13,15 @@ use Throwable;
 
 class ArticleTextExtractor
 {
+    public function __construct(private readonly NszuApiClient $nszuApi = new NszuApiClient) {}
+
     /** @return array{title:?string,text:string,hash:string}|null */
     public function extract(string $url, ?string $contentSelector = null): ?array
     {
+        if ($this->nszuApi->supportsArticleUrl($url)) {
+            return $this->nszuApi->extract($url);
+        }
+
         try {
             $response = Http::withHeaders(UrlHelper::crawlerHeaders())
                 ->withoutVerifying()

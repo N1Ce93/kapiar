@@ -14,7 +14,10 @@ use Throwable;
 
 class ArticleDiscoveryService
 {
-    public function __construct(private readonly SiteProbeService $probeService) {}
+    public function __construct(
+        private readonly SiteProbeService $probeService,
+        private readonly NszuApiClient $nszuApi = new NszuApiClient,
+    ) {}
 
     /** @return list<array{url:string,title:?string,excerpt:?string,published_at:?CarbonImmutable}> */
     public function discover(MonitoredSite $site, int $limit = 50): array
@@ -166,6 +169,14 @@ class ArticleDiscoveryService
         }
 
         $listingUrl = $site->listing_url ?: $site->base_url;
+
+        if ($this->nszuApi->supportsListingUrl($listingUrl)) {
+            return array_values(array_filter(
+                $this->nszuApi->discover($limit),
+                fn (array $item): bool => $this->probeService->isArticleUrl($item['url'], $listingUrl, $site->article_url_pattern),
+            ));
+        }
+
         $items = [];
         $pages = max(1, min(20, (int) ceil($limit / 25)));
 

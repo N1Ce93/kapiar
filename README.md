@@ -227,6 +227,18 @@ docker compose run --rm marketing-php php artisan sites:add "https://example.com
 docker compose run --rm marketing-php php artisan parser:check --site="example.com" --limit=5 --no-notify
 ```
 
+## Новости НСЗУ
+
+Для HTML-источника с адресом `https://nszu.gov.ua/news` (также поддерживается `www`) парсер автоматически использует JSON API сайта: `/api/news?page=N` для списка и `/api/news/<slug>` для текста статьи. Существующая запись источника подходит без миграций и изменения настроек. В базе и уведомлениях сохраняются обычные ссылки `/news/<slug>`.
+
+Клиент запрашивает украинскую локализацию, учитывает пагинацию API (сейчас по 6 новостей) и извлекает текст из JSON-дерева `data.news.content`. Ошибки HTTP, неверный JSON и пустой текст учитываются как ошибки проверки источника; 403 не вызывает немедленных повторов. API также защищено Cloudflare, поэтому оно не гарантирует отсутствие блокировок.
+
+Локальная проверка без обращения к внешним сервисам:
+
+```bash
+docker compose run --rm --no-deps marketing-php php artisan test --filter=Nszu
+```
+
 ## Документация
 
 - [Как добавить сайт](doc/add-site.md)
