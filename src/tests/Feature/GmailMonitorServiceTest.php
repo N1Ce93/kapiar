@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\EmailSubjectKeyword;
+use App\Models\GmailMonitorControl;
 use App\Models\GmailMonitorState;
 use App\Models\GmailProcessingMessage;
 use App\Services\Monitoring\GmailApiClient;
@@ -14,6 +15,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Sleep;
 use Tests\TestCase;
 
 class GmailMonitorServiceTest extends TestCase
@@ -37,10 +39,12 @@ class GmailMonitorServiceTest extends TestCase
         ]);
         Cache::flush();
         Carbon::setTestNow('2026-08-24 12:00:00');
+        Sleep::fake(syncWithCarbon: true);
     }
 
     protected function tearDown(): void
     {
+        Sleep::fake(false);
         Carbon::setTestNow();
 
         parent::tearDown();
@@ -235,7 +239,7 @@ class GmailMonitorServiceTest extends TestCase
                     : ['historyId' => '101'],
                 'message' => $this->gmailMessage('message-1', ['INBOX', 'UNREAD']),
                 'labels' => ['labels' => [['id' => 'Label_1', 'name' => 'Відгуки', 'type' => 'user']]],
-                'modify_status' => $modifyCalls === 0 ? 500 : 200,
+                'modify_status' => $modifyCalls <= config('services.gmail.max_retries') ? 500 : 200,
             ];
 
             if (str_contains($request->url(), '/history')) {
@@ -268,6 +272,72 @@ class GmailMonitorServiceTest extends TestCase
         $this->assertSame(1, $telegramCalls);
         $this->assertSame(1, $stats['completed']);
         $this->assertDatabaseCount('gmail_processing_messages', 0);
+    }
+
+    public function test_a_temporary_quota_error_does_not_pause_monitoring_or_duplicate_delivery(): void
+    {
+        $state = $this->state();
+        EmailSubjectKeyword::create(['phrase' => 'Оставить свой отзыв', 'label_name' => 'Відгуки']);
+        $metadataCalls = 0;
+        Http::fake(function (Request $request) use (&$metadataCalls) {
+            if (str_contains($request->url(), '/messages/message-1?') && str_contains($request->url(), 'format=metadata')) {
+                $metadataCalls++;
+
+                if ($metadataCalls === 1) {
+                    return Http::response(['error' => [
+                        'message' => 'Units per minute per user exceeded.',
+                        'errors' => [['reason' => 'rateLimitExceeded']],
+                    ]], 403);
+                }
+            }
+
+            return $this->responseFor($request, [
+                'profile' => ['emailAddress' => 'monitor@gmail.com', 'historyId' => '101'],
+                'history' => [
+                    'historyId' => '101',
+                    'history' => [['messagesAdded' => [['message' => ['id' => 'message-1']]]]],
+                ],
+                'message' => $this->gmailMessage('message-1', ['INBOX', 'UNREAD']),
+                'labels' => ['labels' => [['id' => 'Label_1', 'name' => 'Відгуки', 'type' => 'user']]],
+            ]);
+        });
+
+        $this->artisan('gmail:check')->assertSuccessful();
+
+        $this->assertSame(2, $metadataCalls);
+        $this->assertSame('101', $state->fresh()->history_id);
+        $this->assertNull(GmailMonitorControl::query()->firstOrFail()->paused_at);
+        $this->assertDatabaseCount('gmail_processing_messages', 0);
+        $this->assertCount(1, Http::recorded(fn (Request $request): bool => str_contains($request->url(), 'api.telegram.org')));
+    }
+
+    public function test_an_exhausted_quota_error_keeps_the_checkpoint_and_reports_its_reason(): void
+    {
+        $state = $this->state();
+        Http::fake(function (Request $request) {
+            if (str_contains($request->url(), '/messages/message-1?')) {
+                return Http::response(['error' => [
+                    'message' => 'Units per minute per user exceeded.',
+                    'errors' => [['reason' => 'rateLimitExceeded']],
+                ]], 403);
+            }
+
+            return $this->responseFor($request, [
+                'profile' => ['emailAddress' => 'monitor@gmail.com', 'historyId' => '101'],
+                'history' => [
+                    'historyId' => '101',
+                    'history' => [['messagesAdded' => [['message' => ['id' => 'message-1']]]]],
+                ],
+            ]);
+        });
+
+        $this->artisan('gmail:check')->assertFailed();
+
+        $this->assertSame('100', $state->fresh()->history_id);
+        $control = GmailMonitorControl::query()->firstOrFail();
+        $this->assertNotNull($control->paused_at);
+        $this->assertStringContainsString('rateLimitExceeded', $control->last_error);
+        $this->assertCount(4, Http::recorded(fn (Request $request): bool => str_contains($request->url(), '/messages/message-1?')));
     }
 
     public function test_it_recovers_an_expired_history_checkpoint_using_unread_inbox_mail_without_spam(): void

@@ -39,6 +39,9 @@ GMAIL_MONITORING_ENABLED=false
 GMAIL_CLIENT_ID=your-client-id
 GMAIL_CLIENT_SECRET=your-client-secret
 GMAIL_REFRESH_TOKEN=your-refresh-token
+GMAIL_QUOTA_UNITS_PER_MINUTE=4000
+GMAIL_MAX_RETRIES=3
+GMAIL_MAX_RETRY_DELAY_SECONDS=120
 TELEGRAM_REVIEW_THREAD_ID=12345
 ```
 
@@ -51,11 +54,42 @@ docker compose run --rm marketing-php php artisan config:clear
 docker compose run --rm marketing-php php artisan gmail:status
 ```
 
-Проверка запускается в `08:00`, `10:00`, `12:00`, `14:00` и `16:00` по Киеву. При ошибке повторных попыток нет: мониторинг ставится на паузу, а причина один раз отправляется в Telegram. После исправления возобновите мониторинг и сразу поставьте проверку в очередь:
+Проверка запускается в `08:00`, `10:00`, `12:00`, `14:00` и `16:00` по Киеву. Gmail-клиент ограничивает расход квоты и повторяет временно отклонённые API-запросы. Если повторы исчерпаны или ошибка постоянная, мониторинг ставится на паузу, а причина один раз отправляется в Telegram. После исправления возобновите мониторинг и сразу поставьте проверку в очередь:
 
 ```bash
 docker compose exec marketing-php php artisan gmail:resume
 ```
+
+## Квота Gmail И HTTP 403
+
+Для проектов с новыми [квотами Gmail API](https://developers.google.com/workspace/gmail/api/reference/quota) лимит составляет 6000 единиц в минуту на пользователя в проекте. Один `messages.get` стоит 20 единиц, даже для `format=metadata`. Получение истории стоит 2 единицы, списка писем — 5, профиля — 1. Квота не связана со сроком жизни OAuth-токена.
+
+- `GMAIL_QUOTA_UNITS_PER_MINUTE=4000` задаёт бюджет приложения с запасом относительно лимита Google. Запросы распределяются равномерно по времени с учётом стоимости операции. Используется общий cache-lock и состояние для Client ID: перезапуск воркера или замена токена не сбрасывают бюджет. В production используйте общий cache store с поддержкой атомарных блокировок, например Redis.
+- `GMAIL_MAX_RETRIES=3` разрешает до трёх дополнительных попыток для HTTP 403 с причиной `rateLimitExceeded` / `userRateLimitExceeded`, HTTP 429 и HTTP 500/502/503/504. При минутном лимите и HTTP 429 клиент ждёт не менее 65 секунд; для 5xx задержка увеличивается: 1, 2, 4 секунды.
+- `Retry-After` учитывается как число секунд или HTTP-дата. `GMAIL_MAX_RETRY_DELAY_SECONDS=120` ограничивает одну задержку. Если Google требует ждать дольше, запрос завершается ошибкой вместо преждевременного повтора.
+- Ошибки `domainPolicy`, `insufficientPermissions`, `dailyLimitExceeded` и OAuth `invalid_grant` не повторяются. HTTP 401 по-прежнему вызывает одно обновление access token.
+- При окончательной ошибке сохраняются сообщение Google, причины, статус и параметры квоты. Client secret, refresh token и текущий access token маскируются.
+
+При HTTP 403 с причиной `rateLimitExceeded` менять refresh token не требуется. После исправления скорости запросов нужно снять сохранённую паузу командой `gmail:resume`. Контрольная точка истории при неудачной обработке не продвигается: накопившиеся письма будут прочитаны при следующей успешной проверке.
+
+### Развёртывание Исправления Квоты
+
+Загрузите обновлённые файлы приложения. Новые переменные окружения необязательны: значения выше используются по умолчанию. Из корня проекта выполните:
+
+```bash
+docker compose exec marketing-php php artisan config:clear
+docker compose restart marketing-email-queue marketing-scheduler
+docker compose exec marketing-php php artisan gmail:resume
+docker compose logs --since=10m -f marketing-email-queue
+```
+
+Обработка накопившейся истории может занять несколько минут из-за ограничения скорости. После завершения проверьте состояние:
+
+```bash
+docker compose exec marketing-php php artisan gmail:status
+```
+
+Для этого исправления миграции БД и замена токена не нужны.
 
 ## Первый запуск
 

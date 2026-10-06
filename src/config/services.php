@@ -56,6 +56,9 @@ return [
         'client_id' => env('GMAIL_CLIENT_ID'),
         'client_secret' => env('GMAIL_CLIENT_SECRET'),
         'refresh_token' => env('GMAIL_REFRESH_TOKEN'),
+        'quota_units_per_minute' => env('GMAIL_QUOTA_UNITS_PER_MINUTE', 4000),
+        'max_retries' => env('GMAIL_MAX_RETRIES', 3),
+        'max_retry_delay_seconds' => env('GMAIL_MAX_RETRY_DELAY_SECONDS', 120),
     ],
 
 ];

@@ -15,6 +15,10 @@ class GmailApiClient
 
     private const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
+    private ?string $lastAccessToken = null;
+
+    public function __construct(private readonly GmailQuotaLimiter $quotaLimiter = new GmailQuotaLimiter) {}
+
     /** @return array{emailAddress:string,historyId:string} */
     public function profile(): array
     {
@@ -182,18 +186,92 @@ class GmailApiClient
             $options['json'] = $json;
         }
 
-        $response = Http::acceptJson()
-            ->withToken($this->accessToken())
-            ->timeout(30)
-            ->send($method, self::API_BASE_URL.$path, $options);
+        $maxRetries = max(0, (int) config('services.gmail.max_retries', 3));
+        $retries = 0;
 
-        if ($response->status() === 401 && $retryUnauthorized) {
-            Cache::forget($this->tokenCacheKey());
+        while (true) {
+            $this->lastAccessToken = $this->accessToken();
+            $this->quotaLimiter->acquire($this->quotaCost($method, $path));
+            $response = Http::acceptJson()
+                ->withToken($this->lastAccessToken)
+                ->timeout(30)
+                ->send($method, self::API_BASE_URL.$path, $options);
 
-            return $this->request($method, $path, $query, $json, false);
+            if ($response->status() === 401 && $retryUnauthorized) {
+                Cache::forget($this->tokenCacheKey());
+                $retryUnauthorized = false;
+
+                continue;
+            }
+
+            $delay = $this->retryDelay($response, $retries);
+
+            if ($delay === null || $retries >= $maxRetries) {
+                return $response;
+            }
+
+            // A shared cooldown also prevents another process from immediately spending the same quota.
+            $this->quotaLimiter->cooldown($delay);
+            $retries++;
+        }
+    }
+
+    private function quotaCost(string $method, string $path): int
+    {
+        return match (true) {
+            $path === '/profile' => 1,
+            $path === '/history' => 2,
+            $path === '/messages' => 5,
+            $path === '/labels' && $method === 'GET' => 1,
+            $path === '/labels', str_ends_with($path, '/modify') => 5,
+            default => 20, // messages.get and messages.attachments.get, including metadata reads.
+        };
+    }
+
+    private function retryDelay(Response $response, int $retries): ?int
+    {
+        $reasons = $response->status() === 403 ? $this->errorReasons($response) : [];
+        $quotaError = $response->status() === 403
+            && array_intersect($reasons, ['dailyLimitExceeded', 'domainPolicy', 'insufficientPermissions']) === []
+            && array_intersect($reasons, ['rateLimitExceeded', 'userRateLimitExceeded', 'RATE_LIMIT_EXCEEDED']) !== [];
+
+        if (! $quotaError && ! in_array($response->status(), [429, 500, 502, 503, 504], true)) {
+            return null;
         }
 
-        return $response;
+        $delay = $quotaError || $response->status() === 429 ? 65 : min(60, 2 ** min($retries, 6));
+        $retryAfter = trim((string) $response->header('Retry-After'));
+
+        if ($retryAfter !== '') {
+            $seconds = ctype_digit($retryAfter)
+                ? (int) $retryAfter
+                : max(0, (strtotime($retryAfter) ?: 0) - now()->getTimestamp());
+            $delay = max($delay, $seconds);
+        }
+
+        // Do not retry earlier than Google requests or sleep beyond the worker's time budget.
+        return $delay <= (int) config('services.gmail.max_retry_delay_seconds', 120) ? $delay : null;
+    }
+
+    /** @return list<string> */
+    private function errorReasons(Response $response): array
+    {
+        $reasons = [];
+
+        foreach ((array) $response->json('error.errors', []) as $error) {
+            if (is_array($error) && is_string($error['reason'] ?? null)) {
+                $reasons[] = $error['reason'];
+            }
+        }
+
+        foreach ((array) $response->json('error.details', []) as $detail) {
+            if (is_array($detail) && ($detail['@type'] ?? '') === 'type.googleapis.com/google.rpc.ErrorInfo'
+                && is_string($detail['reason'] ?? null)) {
+                $reasons[] = $detail['reason'];
+            }
+        }
+
+        return array_values(array_unique($reasons));
     }
 
     private function accessToken(): string
@@ -221,7 +299,7 @@ class GmailApiClient
             throw new GmailApiException(
                 $response->status(),
                 'OAuth token refresh',
-                $detail === '' ? null : mb_substr($detail, 0, 1000, 'UTF-8'),
+                $detail === '' ? null : $this->redactDetail($detail),
             );
         }
 
@@ -240,10 +318,62 @@ class GmailApiClient
     private function successful(Response $response, string $operation): Response
     {
         if (! $response->successful()) {
-            throw new GmailApiException($response->status(), $operation);
+            throw new GmailApiException($response->status(), $operation, $this->errorDetail($response));
         }
 
         return $response;
+    }
+
+    private function errorDetail(Response $response): ?string
+    {
+        $detail = [];
+
+        foreach (['message', 'status'] as $field) {
+            $value = $response->json('error.'.$field);
+
+            if (is_string($value) && $value !== '') {
+                $detail[$field] = $value;
+            }
+        }
+
+        $reasons = $this->errorReasons($response);
+
+        if ($reasons !== []) {
+            $detail['reasons'] = $reasons;
+        }
+
+        if ($response->header('Retry-After') !== null) {
+            $detail['retry_after'] = $response->header('Retry-After');
+        }
+
+        foreach ((array) $response->json('error.details', []) as $entry) {
+            if (! is_array($entry) || ($entry['@type'] ?? '') !== 'type.googleapis.com/google.rpc.ErrorInfo') {
+                continue;
+            }
+
+            foreach (['quota_metric', 'quota_limit', 'quota_limit_value', 'quota_unit'] as $field) {
+                $value = $entry['metadata'][$field] ?? null;
+
+                if (is_scalar($value)) {
+                    $detail[$field] = $value;
+                }
+            }
+        }
+
+        return $detail === [] ? null : $this->redactDetail((string) json_encode($detail, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    }
+
+    private function redactDetail(string $detail): string
+    {
+        foreach (array_filter([
+            (string) config('services.gmail.client_secret'),
+            (string) config('services.gmail.refresh_token'),
+            $this->lastAccessToken,
+        ]) as $secret) {
+            $detail = str_replace($secret, '[redacted]', $detail);
+        }
+
+        return mb_substr($detail, 0, 2000, 'UTF-8');
     }
 
     private function assertConfigured(): void
