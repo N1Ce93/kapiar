@@ -3,6 +3,7 @@
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="csrf-token" content="{{ csrf_token() }}">
         <title>{{ $title }} | {{ config('app.name', 'News Monitor') }}</title>
         <style>
             :root {
@@ -238,6 +239,38 @@
 
             .source-name {
                 font-weight: 800;
+            }
+
+            .recover-site {
+                padding: 6px 12px;
+                border: 1px solid var(--accent);
+                border-radius: 12px;
+                background: var(--accent-soft);
+                color: var(--accent-dark);
+                font: inherit;
+                font-size: 12px;
+                font-weight: 800;
+                cursor: pointer;
+            }
+
+            .recover-site:disabled {
+                opacity: .6;
+                cursor: wait;
+            }
+
+            .recovery-error {
+                margin: 0;
+                color: #a62020;
+                font-size: 13px;
+                overflow-wrap: anywhere;
+            }
+
+            .recovery-success {
+                margin: 0 0 20px;
+                padding: 16px 20px;
+                border-radius: 16px;
+                background: #e7f8ef;
+                color: #11733a;
             }
 
             .status-badge {
@@ -510,6 +543,10 @@
                 </nav>
             </section>
 
+            @if (session('site_recovery_success'))
+                <p class="recovery-success" role="status">{{ session('site_recovery_success') }}</p>
+            @endif
+
             <section class="panel">
                 <div class="toolbar">
                     <div class="filter-group">
@@ -578,7 +615,18 @@
                                                 <div class="source-head">
                                                     <span class="source-name">{{ $row['name'] }}</span>
                                                     <span class="status-badge {{ $row['status']['class'] }}">{{ $row['status']['label'] }}</span>
+                                                    @if ($active === 'sites' && in_array($row['status']['class'], ['disabled', 'paused'], true))
+                                                        <button
+                                                            class="recover-site"
+                                                            type="button"
+                                                            data-recover-url="{{ route('monitoring.sites.recover', ['site' => $row['id']], false) }}"
+                                                            aria-describedby="recovery-error-{{ $row['id'] }}"
+                                                        >Перевірити та увімкнути</button>
+                                                    @endif
                                                 </div>
+                                                @if ($active === 'sites' && in_array($row['status']['class'], ['disabled', 'paused'], true))
+                                                    <p class="recovery-error" id="recovery-error-{{ $row['id'] }}" role="alert" hidden></p>
+                                                @endif
                                                 <a class="source-url" href="{{ $row['url'] }}" target="_blank" rel="noopener noreferrer">{{ $row['url'] }}</a>
                                                 <details
                                                     class="source-details"
@@ -687,6 +735,50 @@
         </main>
 
         <script>
+            document.addEventListener('click', async (event) => {
+                const button = event.target.closest('.recover-site');
+
+                if (! button || button.disabled) {
+                    return;
+                }
+
+                const errorMessage = button.closest('.source').querySelector('.recovery-error');
+                const defaultLabel = button.textContent;
+                button.disabled = true;
+                button.textContent = 'Перевірка…';
+                errorMessage.hidden = true;
+                errorMessage.textContent = '';
+
+                try {
+                    const response = await fetch(button.dataset.recoverUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Accept': 'application/json',
+                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                        },
+                    });
+
+                    if (response.redirected || response.status === 401 || response.status === 419) {
+                        throw new Error('Сесію завершено. Оновіть сторінку та увійдіть знову.');
+                    }
+
+                    const payload = await response.json();
+
+                    if (! response.ok) {
+                        throw new Error(payload.errors?.site?.[0] || 'Не вдалося перевірити сайт. Спробуйте ще раз.');
+                    }
+
+                    window.location.reload();
+                } catch (error) {
+                    errorMessage.textContent = error instanceof SyntaxError || error instanceof TypeError
+                        ? 'Не вдалося отримати результат перевірки. Оновіть сторінку та спробуйте ще раз.'
+                        : error.message;
+                    errorMessage.hidden = false;
+                    button.disabled = false;
+                    button.textContent = defaultLabel;
+                }
+            });
+
             document.addEventListener('click', async (event) => {
                 const button = event.target.closest('.load-more');
 
