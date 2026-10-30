@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\ResumeGmailJob;
 use App\Models\EmailSubjectKeyword;
 use App\Models\GmailMonitorControl;
 use App\Models\GmailMonitorState;
@@ -15,6 +16,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Sleep;
 use Tests\TestCase;
 
@@ -520,6 +522,37 @@ class GmailMonitorServiceTest extends TestCase
         $this->assertNull(GmailMonitorControl::query()->firstOrFail()->paused_at);
         $this->assertDatabaseCount('gmail_processing_messages', 0);
         Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/messages/message-1/modify'));
+    }
+
+    public function test_web_recovery_job_sends_new_reviews_and_publishes_the_result(): void
+    {
+        $this->state();
+        GmailMonitorControl::query()->firstOrFail()->update(['paused_at' => now()]);
+        EmailSubjectKeyword::create(['phrase' => 'Оставить свой отзыв', 'label_name' => 'Відгуки']);
+        config(['queue.default' => 'redis']);
+        Queue::fake();
+        Http::fake(fn (Request $request) => $this->responseFor($request, [
+            'profile' => ['emailAddress' => 'monitor@gmail.com', 'historyId' => '101'],
+            'history' => ['historyId' => '101', 'history' => [['messagesAdded' => [['message' => ['id' => 'message-1']]]]]],
+            'message' => $this->gmailMessage('message-1', ['INBOX', 'UNREAD']),
+            'labels' => ['labels' => [['id' => 'Label_1', 'name' => 'Відгуки', 'type' => 'user']]],
+        ]));
+
+        $this->withSession(['site_access_granted' => true])->postJson('/gmail/resume')->assertAccepted();
+        Http::assertNothingSent();
+        $job = Queue::pushed(ResumeGmailJob::class)->first();
+        $this->app->call([$job, 'handle']);
+
+        $this->getJson('/gmail/status')->assertOk()
+            ->assertJsonPath('status', 'active')
+            ->assertJsonPath('recovery.status', 'succeeded')
+            ->assertJsonPath('recovery.stats.sent', 1)
+            ->assertJsonPath('pending', 0);
+        Http::assertSent(fn (Request $request): bool => str_contains($request->url(), 'api.telegram.org')
+            && str_contains((string) $request['text'], '<b>Новый отзыв</b>'));
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/messages/message-1/modify')
+            && $request['removeLabelIds'] === ['UNREAD']);
+        $this->assertDatabaseCount('gmail_processing_messages', 0);
     }
 
     private function state(): GmailMonitorState

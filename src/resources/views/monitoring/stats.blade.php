@@ -540,6 +540,7 @@
                 <nav class="tabs" aria-label="Розділи моніторингу">
                     <a class="pill {{ $active === 'sites' ? 'active' : '' }}" href="{{ route('monitoring.sites', $periodQuery) }}">Сайти</a>
                     <a class="pill {{ $active === 'telegram' ? 'active' : '' }}" href="{{ route('monitoring.telegram', $periodQuery) }}">Telegram</a>
+                    <button class="pill" type="button" data-gmail-open aria-haspopup="dialog" aria-controls="gmail-modal">Gmail</button>
                 </nav>
             </section>
 
@@ -733,6 +734,8 @@
                 </div>
             </section>
         </main>
+
+        @include('monitoring.partials.gmail-modal')
 
         <script>
             document.addEventListener('click', async (event) => {
