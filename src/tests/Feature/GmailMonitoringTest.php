@@ -40,23 +40,84 @@ class GmailMonitoringTest extends TestCase
 
     public function test_status_and_resume_require_site_access(): void
     {
+        $this->get('/gmail')->assertRedirect('/access');
         $this->getJson('/gmail/status')->assertRedirect('/access');
         $this->postJson('/gmail/resume')->assertRedirect('/access');
         Queue::assertNothingPushed();
         Http::assertNothingSent();
     }
 
-    public function test_modal_is_available_on_both_monitoring_pages(): void
+    public function test_both_monitoring_pages_link_to_the_gmail_page_instead_of_a_modal(): void
     {
         foreach (['/sites', '/telegram'] as $url) {
             $this->withSession(['site_access_granted' => true])->get($url)
                 ->assertOk()
-                ->assertSee('data-gmail-open', false)
-                ->assertSee('id="gmail-modal"', false)
-                ->assertSee('data-status-url="/gmail/status"', false)
-                ->assertSee('data-resume-url="/gmail/resume"', false)
-                ->assertSee('Парсер Gmail');
+                ->assertSee('href="'.route('monitoring.gmail').'">Gmail</a>', false)
+                ->assertDontSee('data-gmail-open', false)
+                ->assertDontSee('<dialog', false)
+                ->assertDontSee('id="gmail-modal"', false)
+                ->assertDontSee('data-status-url=', false);
         }
+        Http::assertNothingSent();
+    }
+
+    public function test_gmail_page_renders_current_state_without_external_requests(): void
+    {
+        $this->state();
+        $this->pause();
+
+        $response = $this->withSession(['site_access_granted' => true])->get('/gmail')
+            ->assertOk()
+            ->assertViewIs('monitoring.gmail')
+            ->assertViewHas('gmail', fn (array $gmail): bool => $gmail['status'] === 'paused' && $gmail['can_resume'])
+            ->assertSee('Моніторинг Gmail')
+            ->assertSee('monitor@gmail.com')
+            ->assertSee('Expired token.')
+            ->assertSee('data-state="paused"', false)
+            ->assertSee('data-status-url="/gmail/status"', false)
+            ->assertSee('data-resume-url="/gmail/resume"', false)
+            ->assertSee('aria-current="page">Gmail</a>', false)
+            ->assertDontSee('<dialog', false)
+            ->assertDontSee('secret-not-for-web')
+            ->assertDontSee('refresh-not-for-web');
+
+        $this->assertStringContainsString('no-store', $response->headers->get('Cache-Control'));
+        Queue::assertNothingPushed();
+        Http::assertNothingSent();
+    }
+
+    public function test_reloading_gmail_page_fetches_latest_state_and_recovery_result(): void
+    {
+        $this->state();
+        $this->withSession(['site_access_granted' => true])->get('/gmail')
+            ->assertSee('data-state="active"', false);
+
+        $this->pause();
+        $this->get('/gmail')->assertSee('data-state="paused"', false)->assertSee('Expired token.');
+
+        GmailMonitorControl::query()->firstOrFail()->update([
+            'paused_at' => null,
+            'recovery_status' => 'succeeded',
+            'recovery_stats' => $this->stats(),
+            'recovery_finished_at' => now(),
+        ]);
+        $this->get('/gmail')->assertSee('data-state="active"', false)
+            ->assertSee('Надіслано в Telegram: 2.')
+            ->assertViewHas('gmail', fn (array $gmail): bool => $gmail['recovery']['status'] === 'succeeded');
+        Http::assertNothingSent();
+    }
+
+    public function test_gmail_page_escapes_error_details(): void
+    {
+        $this->state();
+        $error = '<script>alert("test")</script>';
+        GmailMonitorControl::query()->firstOrFail()->update([
+            'paused_at' => now(), 'last_error' => $error,
+            'recovery_status' => 'failed', 'recovery_error' => $error,
+        ]);
+
+        $this->withSession(['site_access_granted' => true])->get('/gmail')
+            ->assertOk()->assertSee($error)->assertDontSee($error, false);
         Http::assertNothingSent();
     }
 

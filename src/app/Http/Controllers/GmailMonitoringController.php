@@ -4,10 +4,17 @@ namespace App\Http\Controllers;
 
 use App\Services\Monitoring\GmailRecoveryService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Response;
 use Illuminate\Validation\ValidationException;
 
 class GmailMonitoringController extends Controller
 {
+    public function index(GmailRecoveryService $recovery): Response
+    {
+        return response()->view('monitoring.gmail', ['gmail' => $recovery->status()])
+            ->header('Cache-Control', 'no-store');
+    }
+
     public function show(GmailRecoveryService $recovery): JsonResponse
     {
         return response()->json($recovery->status())->header('Cache-Control', 'no-store');
