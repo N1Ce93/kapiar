@@ -28,6 +28,7 @@ class GmailMonitorServiceTest extends TestCase
 
         config([
             'app.timezone' => 'Europe/Kyiv',
+            'services.gmail.monitoring_enabled' => true,
             'services.gmail.client_id' => 'gmail-client-id',
             'services.gmail.client_secret' => 'gmail-client-secret',
             'services.gmail.refresh_token' => 'gmail-refresh-token',
@@ -394,6 +395,131 @@ class GmailMonitorServiceTest extends TestCase
                 $exception->getMessage(),
             );
         }
+    }
+
+    public function test_resume_sends_new_reviews_before_clearing_the_pause_and_does_not_send_them_again(): void
+    {
+        $state = $this->state();
+        GmailMonitorControl::query()->firstOrFail()->update(['paused_at' => now(), 'last_error' => 'Previous error.']);
+        EmailSubjectKeyword::create(['phrase' => 'Оставить свой отзыв', 'label_name' => 'Відгуки']);
+        $historyCalls = 0;
+
+        Http::fake(function (Request $request) use (&$historyCalls) {
+            if (str_contains($request->url(), 'api.telegram.org')) {
+                $this->assertNotNull(GmailMonitorControl::query()->firstOrFail()->paused_at);
+            }
+
+            if (str_contains($request->url(), '/history')) {
+                $historyCalls++;
+            }
+
+            return $this->responseFor($request, [
+                'profile' => ['emailAddress' => 'monitor@gmail.com', 'historyId' => '101'],
+                'history' => $historyCalls === 1
+                    ? ['historyId' => '101', 'history' => [['messagesAdded' => [['message' => ['id' => 'message-1']]]]]]
+                    : ['historyId' => '101'],
+                'message' => $this->gmailMessage('message-1', ['INBOX', 'UNREAD']),
+                'labels' => ['labels' => [['id' => 'Label_1', 'name' => 'Відгуки', 'type' => 'user']]],
+            ]);
+        });
+
+        $this->artisan('gmail:resume')
+            ->expectsTable(
+                ['Found', 'Matched', 'Telegram sent', 'Completed', 'Pending', 'History recovered'],
+                [[1, 1, 1, 1, 0, 'no']],
+            )
+            ->expectsOutput('Gmail check completed successfully. Monitoring is active.')
+            ->assertSuccessful();
+
+        $this->assertNull(GmailMonitorControl::query()->firstOrFail()->paused_at);
+        $this->assertSame('101', $state->fresh()->history_id);
+        $this->assertDatabaseCount('gmail_processing_messages', 0);
+        Http::assertSent(fn (Request $request): bool => str_contains($request->url(), 'api.telegram.org')
+            && str_contains((string) $request['text'], '<b>Новый отзыв</b>')
+            && $request['message_thread_id'] === 9123);
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/messages/message-1/modify')
+            && $request['removeLabelIds'] === ['UNREAD']);
+
+        $this->artisan('gmail:resume')->assertSuccessful();
+        $this->assertCount(1, Http::recorded(fn (Request $request): bool => str_contains($request->url(), 'api.telegram.org')));
+    }
+
+    public function test_first_resume_initializes_and_activates_without_sending_old_mail(): void
+    {
+        GmailMonitorControl::query()->firstOrFail()->update(['paused_at' => now()]);
+        Http::fake(fn (Request $request) => $this->responseFor($request, [
+            'profile' => ['emailAddress' => 'monitor@gmail.com', 'historyId' => '100'],
+        ]));
+
+        $this->artisan('gmail:resume')
+            ->expectsOutput('Gmail monitoring initialized. Existing messages were not processed.')
+            ->expectsOutput('Gmail check completed successfully. Monitoring is active.')
+            ->assertSuccessful();
+
+        $this->assertNull(GmailMonitorControl::query()->firstOrFail()->paused_at);
+        $this->assertDatabaseHas('gmail_monitor_states', ['email_address' => 'monitor@gmail.com', 'history_id' => '100']);
+        Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), '/history')
+            || str_contains($request->url(), 'api.telegram.org'));
+    }
+
+    public function test_resume_with_revoked_oauth_does_not_activate_or_advance_the_checkpoint(): void
+    {
+        $state = $this->state();
+        GmailMonitorControl::query()->firstOrFail()->update(['paused_at' => now()]);
+        Http::fake([
+            'oauth2.googleapis.com/token' => Http::response([
+                'error' => 'invalid_grant',
+                'error_description' => 'Token has been expired or revoked.',
+            ], 400),
+        ]);
+
+        $this->artisan('gmail:resume')
+            ->expectsOutput('Gmail API OAuth token refresh failed with HTTP 400. invalid_grant: Token has been expired or revoked.')
+            ->assertFailed();
+
+        $this->assertNotNull(GmailMonitorControl::query()->firstOrFail()->paused_at);
+        $this->assertSame('100', $state->fresh()->history_id);
+        Http::assertSentCount(1);
+    }
+
+    public function test_resume_keeps_failed_telegram_delivery_pending_and_activates_after_a_successful_retry(): void
+    {
+        $this->state();
+        GmailMonitorControl::query()->firstOrFail()->update(['paused_at' => now()]);
+        EmailSubjectKeyword::create(['phrase' => 'Оставить свой отзыв', 'label_name' => 'Відгуки']);
+        $telegramOk = false;
+        $historyCalls = 0;
+
+        Http::fake(function (Request $request) use (&$telegramOk, &$historyCalls) {
+            if (str_contains($request->url(), '/history')) {
+                $historyCalls++;
+            }
+
+            return $this->responseFor($request, [
+                'profile' => ['emailAddress' => 'monitor@gmail.com', 'historyId' => '101'],
+                'history' => $historyCalls === 1
+                    ? ['historyId' => '101', 'history' => [['messagesAdded' => [['message' => ['id' => 'message-1']]]]]]
+                    : ['historyId' => '101'],
+                'message' => $this->gmailMessage('message-1', ['INBOX', 'UNREAD']),
+                'labels' => ['labels' => [['id' => 'Label_1', 'name' => 'Відгуки', 'type' => 'user']]],
+                'telegram_response' => ['ok' => $telegramOk],
+            ]);
+        });
+
+        $this->artisan('gmail:resume')
+            ->expectsOutput('Telegram notification was not accepted.')
+            ->assertFailed();
+
+        $this->assertNotNull(GmailMonitorControl::query()->firstOrFail()->paused_at);
+        $this->assertDatabaseHas('gmail_processing_messages', ['gmail_message_id' => 'message-1', 'telegram_sent_at' => null]);
+        Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), '/modify'));
+
+        $telegramOk = true;
+        $this->artisan('gmail:resume')->assertSuccessful();
+
+        $this->assertNull(GmailMonitorControl::query()->firstOrFail()->paused_at);
+        $this->assertDatabaseCount('gmail_processing_messages', 0);
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/messages/message-1/modify'));
     }
 
     private function state(): GmailMonitorState

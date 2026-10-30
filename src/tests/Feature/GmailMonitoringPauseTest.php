@@ -8,9 +8,7 @@ use App\Services\Monitoring\GmailCheckRunner;
 use App\Services\Monitoring\GmailMonitoringControl;
 use App\Services\Monitoring\GmailMonitoringPausedException;
 use App\Services\Monitoring\GmailMonitorService;
-use Illuminate\Bus\UniqueLock;
-use Illuminate\Contracts\Bus\Dispatcher;
-use Illuminate\Contracts\Cache\Repository as CacheRepository;
+use Closure;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Queue\TimeoutExceededException;
 use Illuminate\Support\Facades\Cache;
@@ -137,34 +135,47 @@ class GmailMonitoringPauseTest extends TestCase
         $replacement->release();
     }
 
-    public function test_resume_clears_the_pause_and_dispatches_an_immediate_check(): void
+    public function test_resume_only_clears_the_pause_after_a_successful_synchronous_check(): void
     {
         $this->fakeSuccessfulTelegram();
         app(GmailMonitoringControl::class)->pause(new RuntimeException('Expired token.'));
         Queue::fake();
+        $monitor = Mockery::mock(GmailMonitorService::class);
+        $monitor->shouldReceive('check')->once()->with(Mockery::type(Closure::class))
+            ->andReturnUsing(function (Closure $heartbeat): array {
+                $this->assertNotNull(GmailMonitorControl::query()->firstOrFail()->paused_at);
+                $this->assertFalse(Cache::lock(GmailCheckRunner::LOCK_KEY)->get());
+                $heartbeat();
+
+                return $this->successfulStats();
+            });
+        $this->app->instance(GmailMonitorService::class, $monitor);
 
         $this->artisan('gmail:resume')
-            ->expectsOutput('Gmail monitoring resumed and an immediate check was dispatched.')
+            ->expectsOutput('Gmail check completed successfully. Monitoring is active.')
             ->assertSuccessful();
 
         $control = GmailMonitorControl::query()->firstOrFail();
         $this->assertNull($control->paused_at);
         $this->assertNotNull($control->incident_id);
         $this->assertSame('Expired token.', $control->last_error);
-        Queue::assertPushed(CheckGmailJob::class, 1);
+        Queue::assertNothingPushed();
+        $lock = Cache::lock(GmailCheckRunner::LOCK_KEY);
+        $this->assertTrue($lock->get());
+        $lock->release();
     }
 
-    public function test_resume_restores_the_pause_when_dispatch_fails(): void
+    public function test_a_failed_resume_keeps_the_pause_and_displays_the_current_error(): void
     {
         $this->fakeSuccessfulTelegram();
         app(GmailMonitoringControl::class)->pause(new RuntimeException('Expired token.'));
-        $realDispatcher = app(Dispatcher::class);
-        $dispatcher = Mockery::mock(Dispatcher::class);
-        $dispatcher->shouldReceive('dispatch')->once()->andThrow(new RuntimeException('Redis is unavailable.'));
-        $this->app->instance(Dispatcher::class, $dispatcher);
+        $monitor = Mockery::mock(GmailMonitorService::class);
+        $monitor->shouldReceive('check')->once()->andThrow(new RuntimeException('Gmail access is still unavailable.'));
+        $this->app->instance(GmailMonitorService::class, $monitor);
 
         $this->artisan('gmail:resume')
-            ->expectsOutput('Gmail monitoring remains paused because the immediate check could not be dispatched.')
+            ->expectsOutput('Gmail access is still unavailable.')
+            ->expectsOutput('Gmail monitoring was not activated. Fix the error and run gmail:resume again.')
             ->assertFailed();
 
         $control = GmailMonitorControl::query()->firstOrFail();
@@ -173,14 +184,75 @@ class GmailMonitoringPauseTest extends TestCase
         $this->assertSame('Expired token.', $control->last_error);
         Http::assertSentCount(1);
 
-        $uniqueLock = new UniqueLock(app(CacheRepository::class));
-        $this->assertTrue($uniqueLock->acquire(new CheckGmailJob));
-        $uniqueLock->release(new CheckGmailJob);
+        $lock = Cache::lock(GmailCheckRunner::LOCK_KEY);
+        $this->assertTrue($lock->get());
+        $lock->release();
+    }
 
-        $this->app->instance(Dispatcher::class, $realDispatcher);
-        Queue::fake();
-        $this->artisan('gmail:resume')->assertSuccessful();
-        Queue::assertPushed(CheckGmailJob::class, 1);
+    public function test_resume_runs_a_check_even_when_monitoring_is_already_active(): void
+    {
+        $monitor = Mockery::mock(GmailMonitorService::class);
+        $monitor->shouldReceive('check')->once()->andReturn($this->successfulStats());
+        $this->app->instance(GmailMonitorService::class, $monitor);
+
+        $this->artisan('gmail:resume')
+            ->expectsOutput('Gmail check completed successfully. Monitoring is active.')
+            ->assertSuccessful();
+
+        $this->assertNull(GmailMonitorControl::query()->firstOrFail()->paused_at);
+    }
+
+    public function test_a_failed_resume_pauses_previously_active_monitoring(): void
+    {
+        $this->fakeSuccessfulTelegram();
+        $monitor = Mockery::mock(GmailMonitorService::class);
+        $monitor->shouldReceive('check')->once()->andThrow(new RuntimeException('Telegram notification was not accepted.'));
+        $this->app->instance(GmailMonitorService::class, $monitor);
+
+        $this->artisan('gmail:resume')
+            ->expectsOutput('Telegram notification was not accepted.')
+            ->assertFailed();
+
+        $state = GmailMonitorControl::query()->firstOrFail();
+        $this->assertNotNull($state->paused_at);
+        $this->assertSame('Telegram notification was not accepted.', $state->last_error);
+    }
+
+    public function test_resume_does_not_run_or_clear_a_pause_if_another_check_is_running(): void
+    {
+        $this->fakeSuccessfulTelegram();
+        app(GmailMonitoringControl::class)->pause(new RuntimeException('Expired token.'));
+        $monitor = Mockery::mock(GmailMonitorService::class);
+        $monitor->shouldNotReceive('check');
+        $this->app->instance(GmailMonitorService::class, $monitor);
+        $lock = Cache::lock(GmailCheckRunner::LOCK_KEY, GmailCheckRunner::LOCK_SECONDS);
+        $this->assertTrue($lock->get());
+
+        try {
+            $this->artisan('gmail:resume')
+                ->expectsOutput('A Gmail check is already running.')
+                ->assertFailed();
+
+            $this->assertNotNull(GmailMonitorControl::query()->firstOrFail()->paused_at);
+            $this->assertFalse(Cache::lock(GmailCheckRunner::LOCK_KEY)->get());
+        } finally {
+            $lock->release();
+        }
+    }
+
+    public function test_resume_requires_monitoring_to_be_enabled_in_configuration(): void
+    {
+        config(['services.gmail.monitoring_enabled' => false]);
+        $monitor = Mockery::mock(GmailMonitorService::class);
+        $monitor->shouldNotReceive('check');
+        $this->app->instance(GmailMonitorService::class, $monitor);
+        Http::preventStrayRequests();
+
+        $this->artisan('gmail:resume')
+            ->expectsOutput('Gmail monitoring is disabled. Set GMAIL_MONITORING_ENABLED=true before resuming it.')
+            ->assertFailed();
+
+        Http::assertNothingSent();
     }
 
     public function test_dispatch_is_skipped_while_monitoring_is_paused(): void
@@ -249,5 +321,10 @@ class GmailMonitoringPauseTest extends TestCase
     private function fakeSuccessfulTelegram(): void
     {
         Http::fake(['api.telegram.org/*' => Http::response(['ok' => true])]);
+    }
+
+    private function successfulStats(): array
+    {
+        return ['initialized' => false, 'found' => 0, 'matched' => 0, 'sent' => 0, 'completed' => 0, 'pending' => 0, 'recovered' => false];
     }
 }

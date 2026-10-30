@@ -16,9 +16,9 @@ class GmailCheckRunner
         private readonly GmailMonitoringControl $control,
     ) {}
 
-    public function run(Closure $callback): mixed
+    public function run(Closure $callback, bool $allowPaused = false): mixed
     {
-        if ($this->control->isPaused()) {
+        if (! $allowPaused && $this->control->isPaused()) {
             throw new GmailMonitoringPausedException('Gmail monitoring is paused. Run gmail:resume after fixing the error.');
         }
 
@@ -29,7 +29,7 @@ class GmailCheckRunner
         }
 
         try {
-            if ($this->control->isPaused()) {
+            if (! $allowPaused && $this->control->isPaused()) {
                 throw new GmailMonitoringPausedException('Gmail monitoring is paused. Run gmail:resume after fixing the error.');
             }
 
