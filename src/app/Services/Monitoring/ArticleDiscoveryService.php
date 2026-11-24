@@ -9,7 +9,9 @@ use DOMXPath;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
+use LibXMLError;
 use RuntimeException;
+use SimpleXMLElement;
 use Throwable;
 
 class ArticleDiscoveryService
@@ -106,16 +108,7 @@ class ArticleDiscoveryService
         }
 
         $body = ltrim($response->body(), "\xEF\xBB\xBF\t\n\r\0\x0B ");
-
-        try {
-            $xml = @simplexml_load_string($body, 'SimpleXMLElement', LIBXML_NOCDATA);
-        } catch (Throwable $exception) {
-            throw new RuntimeException('RSS feed could not be parsed: '.$exception->getMessage(), previous: $exception);
-        }
-
-        if (! $xml) {
-            throw new RuntimeException('RSS feed could not be parsed: '.$feedUrl);
-        }
+        $xml = $this->parseFeedXml($body, $feedUrl);
 
         $items = [];
 
@@ -159,6 +152,73 @@ class ArticleDiscoveryService
         }
 
         return array_slice($this->uniqueByUrl($items), 0, $limit);
+    }
+
+    private function parseFeedXml(string $body, string $feedUrl): SimpleXMLElement
+    {
+        $previous = libxml_use_internal_errors(true);
+
+        try {
+            libxml_clear_errors();
+            $xml = simplexml_load_string($body, SimpleXMLElement::class, LIBXML_NOCDATA | LIBXML_NONET);
+
+            if ($xml === false) {
+                $normalized = $this->normalizeUndefinedHtmlEntities($body, libxml_get_errors());
+
+                if ($normalized !== $body) {
+                    libxml_clear_errors();
+                    $xml = simplexml_load_string($normalized, SimpleXMLElement::class, LIBXML_NOCDATA | LIBXML_NONET);
+                }
+            }
+
+            $errors = libxml_get_errors();
+        } catch (Throwable $exception) {
+            throw new RuntimeException('RSS feed could not be parsed: '.$feedUrl.': '.$exception->getMessage(), previous: $exception);
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previous);
+        }
+
+        if ($xml === false) {
+            $error = $errors[0] ?? null;
+            $details = $error ? ' (line '.$error->line.', column '.$error->column.'): '.trim($error->message) : '';
+
+            throw new RuntimeException('RSS feed could not be parsed: '.$feedUrl.$details);
+        }
+
+        return $xml;
+    }
+
+    /** @param list<LibXMLError> $errors */
+    private function normalizeUndefinedHtmlEntities(string $body, array $errors): string
+    {
+        $replacements = [];
+
+        foreach ($errors as $error) {
+            // XML_ERR_UNDECLARED_ENTITY: only repair names actually rejected by libxml.
+            if ($error->code !== 26 || ! preg_match("/^Entity '([a-zA-Z][a-zA-Z0-9]*)' not defined/", $error->message, $matches)) {
+                continue;
+            }
+
+            $entity = '&'.$matches[1].';';
+            $decoded = html_entity_decode($entity, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+            if ($decoded !== $entity) {
+                // ASCII references preserve the feed's original encoding, including Windows-1251.
+                $replacements[$entity] = mb_encode_numericentity($decoded, [0, 0x10FFFF, 0, 0x1FFFFF], 'UTF-8');
+            }
+        }
+
+        if ($replacements === []) {
+            return $body;
+        }
+
+        // Entity-looking text in CDATA, comments and processing instructions is literal.
+        return preg_replace_callback(
+            '/<!\[CDATA\[.*?\]\]>|<!--.*?-->|<\?.*?\?>|&[a-zA-Z][a-zA-Z0-9]*;/s',
+            static fn (array $matches): string => $replacements[$matches[0]] ?? $matches[0],
+            $body,
+        ) ?? $body;
     }
 
     /** @return list<array{url:string,title:?string,excerpt:?string,published_at:?CarbonImmutable}> */
