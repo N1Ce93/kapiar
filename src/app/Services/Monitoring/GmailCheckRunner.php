@@ -33,11 +33,17 @@ class GmailCheckRunner
                 throw new GmailMonitoringPausedException('Gmail monitoring is paused. Run gmail:resume after fixing the error.');
             }
 
-            return $callback(function () use ($lock): void {
+            $state = $this->control->state();
+            $heartbeat = function () use ($lock): void {
                 if (! $lock->refresh(self::LOCK_SECONDS)) {
                     throw new RuntimeException('The Gmail check lock was lost.');
                 }
-            });
+            };
+            $result = $callback($heartbeat);
+            $heartbeat();
+            $this->control->clearLastError($state);
+
+            return $result;
         } finally {
             $lock->release();
         }

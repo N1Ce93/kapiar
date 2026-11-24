@@ -243,6 +243,8 @@ class GmailMonitoringTest extends TestCase
 
         $this->getJson('/gmail/status')
             ->assertJsonPath('status', 'active')
+            ->assertJsonPath('last_error', null)
+            ->assertJsonPath('last_error_at', null)
             ->assertJsonPath('recovery.status', 'succeeded')
             ->assertJsonPath('recovery.stats.sent', 2)
             ->assertJsonPath('recovery.stats.completed', 2);
@@ -251,6 +253,9 @@ class GmailMonitoringTest extends TestCase
         $this->assertSame($stats, $control->recovery_stats);
         $this->assertNotNull($control->recovery_finished_at);
         $this->assertFalse(Cache::lock(GmailCheckRunner::LOCK_KEY)->isLocked());
+        $this->get('/gmail')->assertOk()
+            ->assertDontSee('Expired token.')
+            ->assertViewHas('gmail', fn (array $gmail): bool => $gmail['last_error'] === null);
 
         // A duplicate delivery and a late failure must not run or overwrite a completed request.
         $this->app->call([$job, 'handle']);
@@ -277,6 +282,7 @@ class GmailMonitoringTest extends TestCase
         }
 
         $this->getJson('/gmail/status')->assertJsonPath('status', 'paused')
+            ->assertJsonPath('last_error', 'Google rejected access.')
             ->assertJsonPath('can_resume', true)
             ->assertJsonPath('recovery.status', 'failed')
             ->assertJsonPath('recovery.error', 'Google rejected access.');

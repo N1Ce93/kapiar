@@ -77,7 +77,7 @@ class GmailMonitoringPauseTest extends TestCase
         $job->failed(new RuntimeException('Worker timed out again.'));
 
         $this->assertNotNull(GmailMonitorControl::query()->firstOrFail()->paused_at);
-        $this->assertSame('Worker timed out.', GmailMonitorControl::query()->firstOrFail()->last_error);
+        $this->assertSame('Worker timed out again.', GmailMonitorControl::query()->firstOrFail()->last_error);
         Http::assertSentCount(1);
     }
 
@@ -144,6 +144,7 @@ class GmailMonitoringPauseTest extends TestCase
         $monitor->shouldReceive('check')->once()->with(Mockery::type(Closure::class))
             ->andReturnUsing(function (Closure $heartbeat): array {
                 $this->assertNotNull(GmailMonitorControl::query()->firstOrFail()->paused_at);
+                $this->assertSame('Expired token.', GmailMonitorControl::query()->firstOrFail()->last_error);
                 $this->assertFalse(Cache::lock(GmailCheckRunner::LOCK_KEY)->get());
                 $heartbeat();
 
@@ -158,7 +159,8 @@ class GmailMonitoringPauseTest extends TestCase
         $control = GmailMonitorControl::query()->firstOrFail();
         $this->assertNull($control->paused_at);
         $this->assertNotNull($control->incident_id);
-        $this->assertSame('Expired token.', $control->last_error);
+        $this->assertNull($control->last_error);
+        $this->assertNull($control->last_error_at);
         Queue::assertNothingPushed();
         $lock = Cache::lock(GmailCheckRunner::LOCK_KEY);
         $this->assertTrue($lock->get());
@@ -181,7 +183,7 @@ class GmailMonitoringPauseTest extends TestCase
         $control = GmailMonitorControl::query()->firstOrFail();
         $this->assertNotNull($control->paused_at);
         $this->assertNotNull($control->incident_id);
-        $this->assertSame('Expired token.', $control->last_error);
+        $this->assertSame('Gmail access is still unavailable.', $control->last_error);
         Http::assertSentCount(1);
 
         $lock = Cache::lock(GmailCheckRunner::LOCK_KEY);
@@ -200,6 +202,135 @@ class GmailMonitoringPauseTest extends TestCase
             ->assertSuccessful();
 
         $this->assertNull(GmailMonitorControl::query()->firstOrFail()->paused_at);
+    }
+
+    public function test_a_successful_scheduled_check_clears_the_previous_error_only_after_completion(): void
+    {
+        $this->fakeSuccessfulTelegram();
+        $control = app(GmailMonitoringControl::class);
+        $control->pause(new RuntimeException('Previous timeout.'));
+        $control->resume();
+        $previous = $control->state();
+        $monitor = Mockery::mock(GmailMonitorService::class);
+        $monitor->shouldReceive('check')->once()->andReturnUsing(function (): array {
+            $state = GmailMonitorControl::query()->firstOrFail();
+            $this->assertSame('Previous timeout.', $state->last_error);
+            $this->assertNotNull($state->last_error_at);
+
+            return $this->successfulStats();
+        });
+
+        (new CheckGmailJob)->handle(app(GmailCheckRunner::class), $monitor);
+
+        $state = $control->state();
+        $this->assertNull($state->last_error);
+        $this->assertNull($state->last_error_at);
+        $this->assertSame($previous->incident_id, $state->incident_id);
+        $this->assertTrue($previous->alert_delivered_at->equalTo($state->alert_delivered_at));
+        Http::assertSentCount(1);
+    }
+
+    public function test_a_successful_cli_check_clears_an_old_error_without_an_incident_id(): void
+    {
+        GmailMonitorControl::query()->firstOrFail()->update([
+            'last_error' => 'Legacy timeout.',
+            'last_error_at' => now()->subDay(),
+        ]);
+        $monitor = Mockery::mock(GmailMonitorService::class);
+        $monitor->shouldReceive('check')->once()->andReturn($this->successfulStats());
+        $this->app->instance(GmailMonitorService::class, $monitor);
+
+        $this->artisan('gmail:check')->assertSuccessful();
+
+        $state = GmailMonitorControl::query()->firstOrFail();
+        $this->assertNull($state->last_error);
+        $this->assertNull($state->last_error_at);
+    }
+
+    public function test_a_failed_check_replaces_the_previous_error_and_successful_resume_clears_it(): void
+    {
+        $this->fakeSuccessfulTelegram();
+        GmailMonitorControl::query()->firstOrFail()->update([
+            'last_error' => 'Old error.',
+            'last_error_at' => now()->subDay(),
+        ]);
+        $monitor = Mockery::mock(GmailMonitorService::class);
+        $monitor->shouldReceive('check')->once()->andThrow(new RuntimeException('New timeout.'));
+        $monitor->shouldReceive('check')->once()->andReturn($this->successfulStats());
+        $this->app->instance(GmailMonitorService::class, $monitor);
+
+        $this->artisan('gmail:check')->assertFailed();
+
+        $state = GmailMonitorControl::query()->firstOrFail();
+        $this->assertNotNull($state->paused_at);
+        $this->assertSame('New timeout.', $state->last_error);
+        $this->assertNotNull($state->last_error_at);
+        $this->assertTrue($state->last_error_at->isToday());
+
+        $this->artisan('gmail:resume')->assertSuccessful();
+
+        $state = $state->fresh();
+        $this->assertNull($state->paused_at);
+        $this->assertNull($state->last_error);
+        $this->assertNull($state->last_error_at);
+    }
+
+    public function test_a_repeated_failed_resume_updates_the_error_without_sending_another_alert(): void
+    {
+        $this->fakeSuccessfulTelegram();
+        $control = app(GmailMonitoringControl::class);
+        $control->pause(new RuntimeException('First error.'));
+        $previous = $control->state();
+        $this->travel(1)->minute();
+        $monitor = Mockery::mock(GmailMonitorService::class);
+        $monitor->shouldReceive('check')->once()->andThrow(new RuntimeException('Latest error.'));
+        $this->app->instance(GmailMonitorService::class, $monitor);
+
+        $this->artisan('gmail:resume')->assertFailed();
+
+        $state = $control->state();
+        $this->assertSame('Latest error.', $state->last_error);
+        $this->assertTrue($state->last_error_at->greaterThan($previous->last_error_at));
+        $this->assertTrue($state->paused_at->equalTo($previous->paused_at));
+        $this->assertSame($previous->incident_id, $state->incident_id);
+        Http::assertSentCount(1);
+    }
+
+    public function test_a_successful_older_check_cannot_clear_a_newer_incident(): void
+    {
+        $this->fakeSuccessfulTelegram();
+        $control = app(GmailMonitoringControl::class);
+        $control->pause(new RuntimeException('First incident.'));
+        $control->resume();
+
+        app(GmailCheckRunner::class)->run(function () use ($control): void {
+            $control->pause(new RuntimeException('Newer incident.'));
+            $control->resume();
+        });
+
+        $this->assertSame('Newer incident.', $control->state()->last_error);
+        $this->assertNotNull($control->state()->last_error_at);
+    }
+
+    public function test_a_check_that_loses_its_lock_does_not_clear_the_previous_error(): void
+    {
+        GmailMonitorControl::query()->firstOrFail()->update([
+            'last_error' => 'Previous timeout.',
+            'last_error_at' => now(),
+        ]);
+
+        try {
+            app(GmailCheckRunner::class)->run(function (): void {
+                Cache::lock(GmailCheckRunner::LOCK_KEY)->forceRelease();
+            });
+            $this->fail('Expected a lost runtime lock to reject completion.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('The Gmail check lock was lost.', $exception->getMessage());
+        }
+
+        $state = GmailMonitorControl::query()->firstOrFail();
+        $this->assertSame('Previous timeout.', $state->last_error);
+        $this->assertNotNull($state->last_error_at);
     }
 
     public function test_a_failed_resume_pauses_previously_active_monitoring(): void

@@ -50,6 +50,20 @@ class GmailMonitoringControl
             ]);
 
         if ($claimed !== 1) {
+            $state = $this->state();
+
+            // Keep the latest failure visible, without sending another alert for this incident.
+            GmailMonitorControl::query()
+                ->whereKey(GmailMonitorControl::SINGLETON_ID)
+                ->where('incident_id', $state->incident_id)
+                ->where('last_error_at', $state->last_error_at)
+                ->whereNotNull('paused_at')
+                ->update([
+                    'last_error_at' => $now,
+                    'last_error' => $error,
+                    'updated_at' => $now,
+                ]);
+
             return false;
         }
 
@@ -64,6 +78,26 @@ class GmailMonitoringControl
         }
 
         return true;
+    }
+
+    public function clearLastError(GmailMonitorControl $state): bool
+    {
+        if ($state->last_error === null && $state->last_error_at === null) {
+            return false;
+        }
+
+        // An older successful check must not erase a newer failure or an active pause.
+        return GmailMonitorControl::query()
+            ->whereKey(GmailMonitorControl::SINGLETON_ID)
+            ->where('incident_id', $state->incident_id)
+            ->where('last_error', $state->last_error)
+            ->where('last_error_at', $state->last_error_at)
+            ->whereNull('paused_at')
+            ->update([
+                'last_error' => null,
+                'last_error_at' => null,
+                'updated_at' => now(),
+            ]) === 1;
     }
 
     public function resume(): bool

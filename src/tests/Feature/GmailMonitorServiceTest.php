@@ -513,6 +513,8 @@ class GmailMonitorServiceTest extends TestCase
             ->assertFailed();
 
         $this->assertNotNull(GmailMonitorControl::query()->firstOrFail()->paused_at);
+        $this->assertSame('Telegram notification was not accepted.', GmailMonitorControl::query()->firstOrFail()->last_error);
+        $this->assertNotNull(GmailMonitorControl::query()->firstOrFail()->last_error_at);
         $this->assertDatabaseHas('gmail_processing_messages', ['gmail_message_id' => 'message-1', 'telegram_sent_at' => null]);
         Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), '/modify'));
 
@@ -520,6 +522,8 @@ class GmailMonitorServiceTest extends TestCase
         $this->artisan('gmail:resume')->assertSuccessful();
 
         $this->assertNull(GmailMonitorControl::query()->firstOrFail()->paused_at);
+        $this->assertNull(GmailMonitorControl::query()->firstOrFail()->last_error);
+        $this->assertNull(GmailMonitorControl::query()->firstOrFail()->last_error_at);
         $this->assertDatabaseCount('gmail_processing_messages', 0);
         Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/messages/message-1/modify'));
     }
